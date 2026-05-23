@@ -116,7 +116,22 @@ Measured result (long 8-sentence reply):
 | Time to first audio | **3.32 s** | **1.06 s** |
 | Total completion | 3.32 s | 2.98 s |
 
-### 3. MTP (Multi-Token Prediction) speculative decoding
+### 3. WhisperX large-v3 → large-v3-turbo
+
+Switching the STT model to the turbo variant nearly halves transcription time.
+Measured in the warmed-up steady state (2.56 s clip, float16, batch 8, Silero VAD):
+
+| Metric | large-v3 | large-v3-turbo | Δ |
+|---|---|---|---|
+| Transcription (steady median) | 474 ms | **247 ms** | **-48% (1.92x faster)** |
+| Transcription (cold first) | 664 ms | 440 ms | -34% |
+| Model load | 6.51 s | 4.83 s | -26% |
+
+**Effect on first-utterance latency**: STT shaves **~227 ms** off every utterance,
+which goes directly into time-to-first-audio (TTFT). Accuracy is equivalent
+(both return the same text on short clips).
+
+### 4. MTP (Multi-Token Prediction) speculative decoding
 
 Qwen3.6-27B ships with one MTP head, and llama.cpp supports it via
 `--spec-type draft-mtp`. The MTP head drafts up to 3 tokens ahead, and the
@@ -136,7 +151,7 @@ Measured (same gguf, identical prompt, 142 tokens generated, temp 0.7, seed 42):
 streaming pipelining) is **not improved** by MTP. The win shows up in the
 *completion* of long replies; short replies see diminishing returns.
 
-### 4. Cut previous speech when a new turn starts
+### 5. Cut previous speech when a new turn starts
 
 When the mic is pressed, the client calls `stop(0)` on every scheduled
 `AudioBufferSourceNode` and clears the viseme queue (`stopAllPlayback`). It

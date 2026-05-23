@@ -111,7 +111,21 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 | 初音までの時間 | **3.32 s** | **1.06 s** |
 | 全体完了時間 | 3.32 s | 2.98 s |
 
-### 3. MTP (Multi-Token Prediction) 投機デコード
+### 3. WhisperX を large-v3 → large-v3-turbo に変更
+
+STT 段を turbo モデルに切り替えると、転写時間がほぼ半減します。`/warmup` 済みの
+steady state で測定 (2.56 秒の音声サンプル、float16、batch 8、Silero VAD):
+
+| 指標 | large-v3 | large-v3-turbo | 改善 |
+|---|---|---|---|
+| 転写時間 (steady median) | 474 ms | **247 ms** | **-48% (1.92x 速い)** |
+| 転写時間 (cold first) | 664 ms | 440 ms | -34% |
+| モデルロード | 6.51 s | 4.83 s | -26% |
+
+**「最初の発話」への効果**: STT 段が **約 227 ms 短縮** されるので、初音までの時間が
+そのぶん早くなります (TTFT に効く)。認識精度は同等(短文では同じテキストを返す)。
+
+### 4. MTP (Multi-Token Prediction) 投機デコード
 
 Qwen3.6-27B には MTP 層が 1 つ付属しており、llama.cpp の `--spec-type draft-mtp`
 で投機的デコードができます。MTP ヘッドが draft トークンを 3 つまで先読みし、
@@ -130,7 +144,7 @@ Qwen3.6-27B には MTP 層が 1 つ付属しており、llama.cpp の `--spec-ty
 よって「初音までの時間」(streaming pipelining で 1.06 s 達成) は **MTP では短縮されず**、
 効果が出るのは「長文応答の完走時間」です。短い応答ほど効果が薄れます。
 
-### 4. 新ターン開始時に前の発話を即停止
+### 5. 新ターン開始時に前の発話を即停止
 
 マイクを押した時点で、クライアントは現在スケジュール済みの全 `AudioBufferSourceNode` を
 `stop(0)` → viseme キューも消す、という処理を入れています (`stopAllPlayback`)。
