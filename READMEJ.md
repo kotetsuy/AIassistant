@@ -5,6 +5,9 @@
 Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS → VRM リップシンク** を
 一気通貫で動かすローカルスタック。ブラウザの 🎤 ボタンを押すとコテコが声で返します。
 
+<img width="1219" height="1140" alt="https---qiita-image-store s3 ap-northeast-1 amazonaws com-0-263486-86fd1211-a196-4c6d-bf7b-e4ff53d8c5ba" src="https://github.com/user-attachments/assets/4292a4f1-5239-4a83-8c9e-3c3d4610fed2" />
+
+
 ```
 ブラウザ (three-vrm)
   └─ マイク録音 (MediaRecorder webm/opus)
@@ -42,11 +45,236 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 - **Python** : 3.12.3
 - **Docker** : 29.x (VOICEVOX 用)
 - **ブラウザ** : Google Chrome (`AudioContext` を使うため Firefox でも可)
-- **tmux / curl** : 起動スクリプトで使用
+- **tmux / curl / uv / huggingface_hub (hf CLI)** : 起動スクリプトで使用
 
 詳細なセットアップは各サブディレクトリの `READMEJ.md` を参照:
 `ttllm/READMEJ.md` / `vtt/READMEJ.md` / `three-vrm/READMEJ.md` / `voicevox/READMEJ.md` /
 `whisperX-rocm/READMEJ.md`。
+
+## git clone から ./start_all.sh でコテコが喋るまでの手順
+
+## 1. リポジトリと依存物の取得
+
+本体リポジトリには `whisperX-rocm` / `llama.cpp` / `qwen3.6` をシンボリックリンクで参照する構造になっているので、まず本体と依存物を **ホームディレクトリ直下** に並べて配置します。
+
+```bash
+cd ~
+git clone https://github.com/kotetsuy/AIassistant.git
+git clone https://github.com/ggml-org/llama.cpp.git
+```
+
+WhisperX の ROCm フォークと CTranslate2 の ROCm フォークも別途必要です:
+
+```bash
+mkdir -p ~/whisperx && cd ~/whisperx
+git clone https://github.com/<your_whisperx_rocm_fork>/whisperX-rocm.git
+git clone https://github.com/<your_ctranslate2_rocm_fork>/ctranslate2-rocm.git
+```
+
+> :pencil: 実機では `whisperX-rocm` を `~/AIzunda/whisperX-rocm` に置いていますが、新規構築する場合は `~/whisperx/whisperX-rocm` でも構いません。AIassistant 側の `whisperX-rocm` は **シンボリックリンク** なので、リンク先は環境に合わせて貼り直してください。
+
+---
+
+## 2. CTranslate2-ROCm をソースビルド
+
+`faster-whisper` が呼ぶ CTranslate2 を ROCm/HIP 対応でビルドします。
+
+```bash
+cd ~/whisperx/ctranslate2-rocm
+mkdir -p build && cd build
+
+export HSA_OVERRIDE_GFX_VERSION=11.5.1
+export AMDGPU_TARGETS=gfx1151
+
+cmake .. -DWITH_HIP=ON -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
+  -DCMAKE_HIP_ARCHITECTURES=gfx1151 -DCMAKE_BUILD_TYPE=Release \
+  -DOPENMP_RUNTIME=COMP \
+  -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
+  -DCMAKE_C_COMPILER=/opt/rocm/lib/llvm/bin/clang \
+  -DCMAKE_PREFIX_PATH=/opt/rocm -DBUILD_CLI=OFF
+make -j$(nproc) && sudo make install
+```
+
+`/usr/local/lib/libctranslate2.so` が入れば成功です。
+
+---
+
+## 3. WhisperX-ROCm 用の venv を作る
+
+```bash
+cd ~/whisperx/whisperX-rocm
+uv venv && uv pip install -e .
+
+# ROCm 版 ctranslate2 の Python バインディングを再インストール
+rm -rf .venv/lib/python3.12/site-packages/ctranslate2*
+export CTRANSLATE2_ROOT=/usr/local
+uv pip install --reinstall pybind11 ~/whisperx/ctranslate2-rocm/python
+```
+
+確認:
+
+```bash
+.venv/bin/python -c "import torch; print('CUDA:', torch.cuda.is_available())"
+# → CUDA: True  (ROCm の HIP レイヤーが CUDA API を翻訳している)
+.venv/bin/python -c "import ctranslate2; print(ctranslate2.__version__)"
+```
+
+---
+
+## 4. llama.cpp を **MTP 対応の最新 master** でビルド
+
+Qwen3.5/3.6 系の **MTP (Multi-Token Prediction)** サポートは PR [#22673](https://github.com/ggml-org/llama.cpp/pull/22673) でマージされたばかりです (2026-05 時点)。後半 [§3](#3-mtp-投機デコードの仕組みと効果) で使うので、master 最新を pull してください。
+
+```bash
+cd ~/llama.cpp
+git pull --ff-only origin master
+
+mkdir -p build && cd build
+export HSA_OVERRIDE_GFX_VERSION=11.5.1
+export AMDGPU_TARGETS=gfx1151
+
+cmake .. -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1151 \
+  -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
+  -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+```
+
+ビルド後の確認:
+
+```bash
+./bin/llama-server --version
+# version: 9294 (...) など
+
+./bin/llama-server --help | grep -A2 spec-type
+# --spec-type none,draft-simple,draft-eagle3,draft-mtp,...
+```
+
+`draft-mtp` が出てくれば MTP 対応版です。
+
+---
+
+## 5. Qwen3.6 MTP モデルをダウンロード
+
+`hf` (huggingface CLI、旧 `huggingface-cli`) でモデルを取得します:
+
+```bash
+mkdir -p ~/qwen3.6
+hf download am17an/Qwen3.6-27B-MTP-GGUF Qwen3.6-27B-MTP-Q8_0.gguf \
+  --local-dir ~/qwen3.6
+```
+
+29 GB あります。MTP 層を含むことを確認:
+
+```bash
+cd ~/llama.cpp
+python3 gguf-py/gguf/scripts/gguf_dump.py --no-tensors \
+  ~/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf | grep -E "nextn|architecture"
+# → qwen35.nextn_predict_layers = 1
+```
+
+`nextn_predict_layers = 1` が出れば MTP 層入り gguf です。
+
+---
+
+## 6. AIassistant 内のシンボリックリンクを張る
+
+`~/AIassistant` 配下から `llama.cpp` / `whisperX-rocm` / `qwen3.6` を相対パスで参照できるようにします。
+
+```bash
+cd ~/AIassistant
+ln -sf ../llama.cpp llama.cpp
+ln -sf ../whisperx/whisperX-rocm whisperX-rocm
+ln -sf ../qwen3.6 qwen3.6
+
+ls -la
+# llama.cpp -> ../llama.cpp
+# qwen3.6 -> ../qwen3.6
+# whisperX-rocm -> ../whisperx/whisperX-rocm
+```
+
+---
+
+## 7. ttllm ブリッジの依存を venv に追加
+
+```bash
+cd ~/AIassistant/ttllm
+./install.sh
+```
+
+`fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` が **WhisperX-ROCm の venv に追加** されます (専用 venv は作らず共有)。
+
+---
+
+## 8. VRM モデル (コテコ) を配置
+
+VRoid Studio などで作った VRM 1.0 モデルを置きます:
+
+```bash
+mkdir -p ~/AIassistant/vroid
+cp /path/to/your_avatar.vrm ~/AIassistant/vroid/koteko.vrm
+```
+
+ファイル名を変える場合は以下 2 箇所を合わせて書き換えてください:
+
+```python
+# three-vrm/server.py
+VRM_DIR = os.path.expanduser("~/AIassistant/vroid")
+```
+```html
+<!-- three-vrm/TalkingHead/zundamon.html -->
+const VRM_URL = "http://localhost:8000/vrm/koteko.vrm";
+```
+
+---
+
+## 9. VOICEVOX Docker を取得
+
+```bash
+docker pull voicevox/voicevox_engine:cpu-ubuntu20.04-latest
+# 起動は start_all.sh が面倒を見るのでここでは pull だけで OK
+```
+
+CPU 推論版を使います。GPU は LLM + STT で埋めるので、TTS は CPU が無難。
+
+---
+
+## 10. 一括起動
+
+```bash
+cd ~/AIassistant
+./start_all.sh
+```
+
+以下が直列で立ち上がり、HTTP health check で待ち合わせます:
+
+1. VOICEVOX (Docker, port 50021)
+2. llama-server (Qwen3.6-27B-MTP, port 8080, `--spec-type draft-mtp` 付き)
+3. ttllm ブリッジ (port 8001)
+4. WhisperX warmup (`POST /warmup` を叩いて初回のモデルロードを済ませる)
+5. three-vrm サーバ (port 8000)
+6. Chrome で `http://localhost:8000/zundamon.html` を自動オープン
+7. vtt (CLI PTT、任意)
+
+全ウィンドウは tmux セッション `aiassistant` に入っているので、
+
+```bash
+tmux attach -t aiassistant   # ログを見る
+~/AIassistant/stop_all.sh    # 全部止める
+```
+
+で操作できます。
+
+---
+
+## 11. 動作確認
+
+ブラウザが開いたら **画面を一度クリック** して AudioContext を有効化 (Chrome の user-gesture 要件)。右下の 🎤 ボタンの動線:
+
+- **長押し (≥ 250 ms)**: 押している間だけ録音、離すと自動で送信
+- **短クリック**: 録音開始 → もう一度クリックで送信
+
+ユーザー発話は薄青、コテコの返答は白の字幕として出ます。初音まで体感 1 秒前後で返ってくれば成功です。
 
 ## 一括起動 / 停止
 
