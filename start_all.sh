@@ -20,10 +20,10 @@ set -euo pipefail
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export PULSE_SERVER="${PULSE_SERVER:-unix:${XDG_RUNTIME_DIR}/pulse/native}"
 
-SESSION="aizunda"
+SESSION="aiassistant"
 
 LLAMA_BIN="/home/$USER/llama.cpp/build/bin/llama-server"
-QWEN_MODEL="/home/$USER/AIzunda/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+QWEN_MODEL="/home/$USER/AIassistant/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
 LLAMA_HOST="127.0.0.1"
 LLAMA_PORT="8080"
 LLAMA_CTX="8192"
@@ -32,9 +32,9 @@ LLAMA_NGL="99"
 VOICEVOX_CONTAINER="voicevox_engine"
 VOICEVOX_IMAGE="voicevox/voicevox_engine:cpu-ubuntu20.04-latest"
 
-TTLLM_DIR="/home/$USER/AIzunda/ttllm"
-THREE_VRM_DIR="/home/$USER/AIzunda/three-vrm"
-VTT_DIR="/home/$USER/AIzunda/vtt"
+TTLLM_DIR="/home/$USER/AIassistant/ttllm"
+THREE_VRM_DIR="/home/$USER/AIassistant/three-vrm"
+VTT_DIR="/home/$USER/AIassistant/vtt"
 
 BROWSER_URL="http://localhost:8000/zundamon.html"
 

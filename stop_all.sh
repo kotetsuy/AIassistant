@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-SESSION="aizunda"
+SESSION="aiassistant"
 VOICEVOX_CONTAINER="voicevox_engine"
 KEEP_VOICEVOX=0
 
@@ -39,9 +39,9 @@ fi
 
 PATTERNS=(
     "llama.cpp/build/bin/llama-server"
-    "AIzunda/ttllm/server:app"
-    "AIzunda/three-vrm/server.py"
-    "AIzunda/vtt/vtt.py"
+    "AIassistant/ttllm/server:app"
+    "AIassistant/three-vrm/server.py"
+    "AIassistant/vtt/vtt.py"
 )
 
 for pat in "${PATTERNS[@]}"; do

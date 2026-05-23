@@ -22,7 +22,7 @@ LLAMA_TIMEOUT = float(os.getenv("LLAMA_TIMEOUT", "120"))
 
 SYSTEM_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
-    "あなたはずんだもんです。一人称は「ボク」、語尾に「のだ」を付けて、親しみやすく簡潔に話してください。",
+    "あなたはオリジナルキャラです。名前はコテコ。一人称は「コテコ」、語尾を「アルヨ調」にして、親しみやすく簡潔に話してください。",
 )
 
 _model = None
