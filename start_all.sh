@@ -23,7 +23,7 @@ export PULSE_SERVER="${PULSE_SERVER:-unix:${XDG_RUNTIME_DIR}/pulse/native}"
 SESSION="aiassistant"
 
 LLAMA_BIN="/home/$USER/llama.cpp/build/bin/llama-server"
-QWEN_MODEL="/home/$USER/AIassistant/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+QWEN_MODEL="/home/$USER/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf"
 LLAMA_HOST="127.0.0.1"
 LLAMA_PORT="8080"
 LLAMA_CTX="8192"
@@ -125,7 +125,7 @@ LLAMA_CMD="HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION} \
 ROCM_PATH=${ROCM_PATH} \
 HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES} \
 LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
-${LLAMA_BIN} -m ${QWEN_MODEL} --host ${LLAMA_HOST} --port ${LLAMA_PORT} -ngl ${LLAMA_NGL} -c ${LLAMA_CTX} -fit off"
+${LLAMA_BIN} -m ${QWEN_MODEL} --host ${LLAMA_HOST} --port ${LLAMA_PORT} -ngl ${LLAMA_NGL} -c ${LLAMA_CTX} -fit off --spec-type draft-mtp"
 
 new_window "llama" "$LLAMA_CMD"
 
