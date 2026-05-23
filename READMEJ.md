@@ -230,6 +230,10 @@ VRM_DIR = os.path.expanduser("~/AIassistant/vroid")
 const VRM_URL = "http://localhost:8000/vrm/koteko.vrm";
 ```
 
+サンプルを作りました。自由にお使いください。
+
+https://hub.vroid.com/characters/2782544841139509367
+
 ---
 
 ## 9. VOICEVOX Docker を取得
