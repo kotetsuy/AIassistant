@@ -77,6 +77,10 @@ git clone https://github.com/<your_ctranslate2_rocm_fork>/ctranslate2-rocm.git
 > but for a fresh setup `~/whisperx/whisperX-rocm` works just as well. The `whisperX-rocm`
 > entry inside AIassistant is a **symlink**, so re-point it to match your environment.
 
+Refer this URL also.
+
+https://qiita.com/kotetsu_yama/items/449e0d0527ab3a233fb8
+
 ---
 
 ## 2. Build CTranslate2-ROCm from source
