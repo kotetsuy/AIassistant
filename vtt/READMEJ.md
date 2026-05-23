@@ -2,7 +2,7 @@
 
 このPCに接続された USB マイク（または任意の入力デバイス）から音声を録って、
 `ttllm` ブリッジ経由で WhisperX に投げて文字起こしする最小構成の CLI です。
-AIzunda パイプライン（`vtt → ttllm → llama-server → voicevox → talkinghead/zundavrm`）
+AIassistant パイプライン（`vtt → ttllm → llama-server → voicevox → three-vrm`）
 の先頭、音声入力の段を担当します。
 
 2026-04-20 時点で、USB マイク入力 → WhisperX-ROCm 転写までエンドツーエンドで動作確認済みです。
@@ -18,7 +18,7 @@ vtt/
 ```
 
 `ttllm` の `/transcribe` に WAV を POST する薄いクライアントです。
-WhisperX / torch-ROCm / ctranslate2-rocm は ttllm 側（`~/AIzunda/whisperx-rocm`）が
+WhisperX / torch-ROCm / ctranslate2-rocm は ttllm 側（`~/AIzunda/whisperX-rocm`、`~/AIassistant/whisperX-rocm` 経由でアクセス可）が
 抱えているので、vtt 本体では `numpy` / `sounddevice` / `soundfile` / `httpx` だけ入ります。
 
 ## 動作確認済みの構成
@@ -27,9 +27,9 @@ WhisperX / torch-ROCm / ctranslate2-rocm は ttllm 側（`~/AIzunda/whisperx-roc
 | ---- | --- |
 | OS | Ubuntu 24.04.4 LTS (PipeWire) |
 | 入力デバイス | USB Composite Device (YunChen, card 1, 48kHz mono) |
-| ttllm 先 | `http://localhost:8001`（`~/AIzunda/ttllm/run.sh`） |
-| WhisperX venv | `~/whisperx-rocm/.venv`（torch 2.9.1+rocm7.2.0 / ctranslate2 4.6.2 / faster-whisper 1.2.1） |
-| モデル | `large-v3`（ttllm 側で環境変数指定） |
+| ttllm 先 | `http://localhost:8001`（`~/AIassistant/ttllm/run.sh`） |
+| WhisperX venv | `~/AIzunda/whisperX-rocm/.venv`（torch 2.9.1+rocm7.2.0 / ctranslate2 4.6.2 / faster-whisper 1.2.1） |
+| モデル | `large-v3-turbo`（ttllm 側で環境変数指定） |
 
 起こったハマりポイント：
 
@@ -38,12 +38,12 @@ WhisperX / torch-ROCm / ctranslate2-rocm は ttllm 側（`~/AIzunda/whisperx-roc
 
 ## 前提
 
-- `~/AIzunda/ttllm` が起動中で、`http://localhost:8001` に応答すること
+- `~/AIassistant/ttllm` が起動中で、`http://localhost:8001` に応答すること
   ```bash
-  cd ~/AIzunda/ttllm && ./run.sh
+  cd ~/AIassistant/ttllm && ./run.sh
   ```
-- `~/AIZunda/whisperx-rocm` に whisperx が入っており、ttllm の `WHISPERX_VENV`
-  が`~/AIZunda/whisperx-rocm/.venv`を指していること（ttllm の `READMEJ.md` 参照）
+- `~/AIzunda/whisperX-rocm` に whisperx が入っており、ttllm の `WHISPERX_VENV`
+  が`~/AIzunda/whisperX-rocm/.venv`を指していること（ttllm の `READMEJ.md` 参照）
 - `libportaudio2` が入っていること
   ```bash
   sudo apt-get install -y libportaudio2
@@ -52,7 +52,7 @@ WhisperX / torch-ROCm / ctranslate2-rocm は ttllm 側（`~/AIzunda/whisperx-roc
 ## セットアップ
 
 ```bash
-cd ~/AIzunda/vtt
+cd ~/AIassistant/vtt
 ./install.sh
 ```
 
@@ -162,7 +162,7 @@ VAD listening (threshold=0.012, silence=0.8s). Ctrl+C to stop.
 ## 次の段につなぐとき
 
 `/transcribe` ではなく ttllm の `/voice_chat` を叩けば、転写から llama.cpp 応答まで
-ワンショットで返ります。ブラウザ（`talkinghead` / `zundavrm`）から直接叩く場合は
+ワンショットで返ります。ブラウザ（`three-vrm`）から直接叩く場合は
 `ttllm/READMEJ.md` の JavaScript サンプルを参照してください。vtt 側から LLM まで
 通したいなら、`post_transcribe` を `/voice_chat` 呼び出しに差し替えて `reply`
 フィールドも出すだけです。
@@ -173,7 +173,7 @@ VAD listening (threshold=0.012, silence=0.8s). Ctrl+C to stop.
   `--vad-threshold` を 0.02 ～ 0.05 あたりまで上げて調整してください。
 - 1 発話を 55s で切るため、長い読み上げは自動で分割転写されます。連結は呼び出し側で。
 - ttllm が起動していない状態で実行すると `/transcribe` で SystemExit します。
-  `cd ~/AIzunda/ttllm && ./run.sh` を別ターミナルで先に立ち上げてください。
+  `cd ~/AIassistant/ttllm && ./run.sh` を別ターミナルで先に立ち上げてください。
 - 初回の `/transcribe` は WhisperX モデルのロードで数十秒かかります。以降は
   ttllm プロセスが生きている限りウォーム状態なので再ロードは不要です。
 - MacBook から RDP ログイン中に Mac 側のマイクを使いたいケースは `--device` で

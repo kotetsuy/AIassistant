@@ -115,13 +115,13 @@ synthesize("こんにちは、ずんだもんなのだ！")
 ```
 マイク入力
    ↓
-WhisperX (STT) - ~/AIzunda/whisperX-rocm
+WhisperX (STT) - ~/AIassistant/whisperX-rocm (~/AIzunda/whisperX-rocm symlink)
    ↓ テキスト
-llama-server (LLM) - Qwen3.5-35B, localhost:8080
+llama-server (LLM) - Qwen3.6-27B MTP, localhost:8080
    ↓ 応答テキスト
 VOICEVOX Engine (TTS) ← ここ - localhost:50021
    ↓ WAV音声
-TalkingHead (VRM) - ブラウザ、リップシンク表示
+three-vrm (VRM) - ブラウザ、リップシンク表示
 ```
 
 ## 出力仕様

@@ -1,6 +1,6 @@
 # ttllm — WhisperX ↔ llama.cpp ブリッジ
 
-WhisperX（音声認識）と llama.cpp（`llama-server`）を繋ぐ、最小構成の FastAPI ブリッジサービスです。音声を投げると文字起こし → LLM 応答までをひとまとめに返します。`talkinghead` / `zundavrm` など AIzunda パイプラインのフロントから直接叩くことを想定しています。
+WhisperX（音声認識）と llama.cpp（`llama-server`）を繋ぐ、最小構成の FastAPI ブリッジサービスです。音声を投げると文字起こし → LLM 応答までをひとまとめに返します。`three-vrm` など AIassistant パイプラインのフロントから直接叩くことを想定しています。
 
 ## 構成
 
@@ -12,18 +12,18 @@ ttllm/
 └── READMEJ.md   # このファイル
 ```
 
-WhisperX-ROCm がインストール済みの venv（`~/AIzunda/whisperx-rocm/.venv`）を共有して動かすので、torch-ROCm / ctranslate2-rocm を二重に入れる必要はありません。
+WhisperX-ROCm がインストール済みの venv（`~/AIzunda/whisperX-rocm/.venv`）を共有して動かすので、torch-ROCm / ctranslate2-rocm を二重に入れる必要はありません。`~/AIassistant/whisperX-rocm` はそこへのシンボリックリンクです。
 
 ## 前提
 
-- `~/AIzunda/whisperx-rocm/.venv` に WhisperX-ROCm 一式（whisperx / torch 2.9+rocm / ctranslate2 / faster-whisper / pyannote.audio）が入っていること
-- `~/AIzunda/llama.cpp/build/bin/llama-server` がビルド済みであること
-- Qwen3.6 モデル: `~/AIzunda/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`
+- `~/AIzunda/whisperX-rocm/.venv` に WhisperX-ROCm 一式（whisperx / torch 2.9+rocm / ctranslate2 / faster-whisper / pyannote.audio）が入っていること
+- `~/llama.cpp/build/bin/llama-server` がビルド済みであること（MTP 対応のため master 最新を推奨）
+- Qwen3.6 モデル: `~/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf`
 
 ## セットアップ
 
 ```bash
-cd ~/AIzunda/ttllm
+cd ~/AIassistant/ttllm
 ./install.sh
 ```
 
@@ -31,20 +31,21 @@ cd ~/AIzunda/ttllm
 
 ## 起動
 
-**1. llama-server を立ち上げる**（別ターミナル）
+**1. llama-server を立ち上げる**（別ターミナル、MTP 投機デコード有効）
 
 ```bash
-cd ~/AIzunda/llama.cpp/build/bin
+cd ~/llama.cpp/build/bin
 ./llama-server \
-    -m ~/AIzunda/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
+    -m ~/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf \
     --host 127.0.0.1 --port 8080 \
-    -ngl 99 -c 8192
+    -ngl 99 -c 8192 \
+    --spec-type draft-mtp
 ```
 
 **2. ブリッジを立ち上げる**
 
 ```bash
-cd ~/AIzunda/ttllm
+cd ~/AIassistant/ttllm
 ./run.sh
 ```
 
@@ -65,7 +66,7 @@ cd ~/AIzunda/ttllm
 | フィールド    | 型                       | 既定値  | 説明 |
 | ------------- | ------------------------ | ------- | ---- |
 | `audio`       | file                     | —       | wav / mp3 / m4a 等 |
-| `system`      | str                      | ずんだもん persona | システムプロンプト上書き |
+| `system`      | str                      | コテコ persona | システムプロンプト上書き |
 | `history`     | str (JSON list)          | `[]`    | `[{"role":"user","content":"..."}]` 形式 |
 | `temperature` | float                    | `0.7`   | |
 | `max_tokens`  | int                      | `512`   | |
@@ -73,7 +74,7 @@ cd ~/AIzunda/ttllm
 レスポンス:
 
 ```json
-{ "transcript": "こんにちは", "reply": "こんにちはなのだ！" }
+{ "transcript": "こんにちは", "reply": "こんにちはアルヨ！" }
 ```
 
 ### `/chat`（application/json）
@@ -98,7 +99,7 @@ curl -X POST http://localhost:8001/voice_chat \
 # テキストだけで LLM に聞く
 curl -X POST http://localhost:8001/chat \
     -H 'Content-Type: application/json' \
-    -d '{"text":"ずんだ餅について教えてなのだ"}'
+    -d '{"text":"自己紹介してアルヨ"}'
 
 # モデル先読み（初回の体感遅延を消す）
 curl -X POST http://localhost:8001/warmup
@@ -108,7 +109,7 @@ curl -X POST http://localhost:8001/warmup
 
 | 変数                    | 既定値                         | 説明 |
 | ----------------------- | ------------------------------ | ---- |
-| `WHISPER_MODEL`         | `large-v3`                     | WhisperX モデル名 |
+| `WHISPER_MODEL`         | `large-v3-turbo`               | WhisperX モデル名 |
 | `WHISPER_LANGUAGE`      | `ja`                           | 認識言語 |
 | `WHISPER_COMPUTE_TYPE`  | `float16`                      | `float16` / `int8_float16` など |
 | `WHISPER_DEVICE`        | `cuda`                         | ROCm の HIP レイヤー経由で GPU が使われる |
@@ -116,14 +117,14 @@ curl -X POST http://localhost:8001/warmup
 | `WHISPER_VAD_METHOD`    | `silero`                       | `silero` / `pyannote` |
 | `LLAMA_SERVER_URL`      | `http://localhost:8080`        | llama-server の URL |
 | `LLAMA_TIMEOUT`         | `120`                          | 秒 |
-| `SYSTEM_PROMPT`         | ずんだもん persona             | 既定システムプロンプト |
+| `SYSTEM_PROMPT`         | コテコ persona (アルヨ調)      | 既定システムプロンプト |
 | `BRIDGE_HOST`           | `0.0.0.0`                      | |
 | `BRIDGE_PORT`           | `8001`                         | |
-| `WHISPERX_VENV`         | `~/venv/whisperx-rocm`         | 共有する venv のパス（whisperx / torch-ROCm / ctranslate2 が入っている側） |
+| `WHISPERX_VENV`         | `~/AIzunda/whisperX-rocm/.venv` | 共有する venv のパス（whisperx / torch-ROCm / ctranslate2 が入っている側） |
 
 ## フロントからの呼び出し
 
-CORS は全許可で立ち上がるので、`talkinghead` / `zundavrm` などのブラウザ側から直接 `fetch` できます。例:
+CORS は全許可で立ち上がるので、`three-vrm` などのブラウザ側から直接 `fetch` できます。例:
 
 ```javascript
 const fd = new FormData();

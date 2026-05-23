@@ -1,8 +1,10 @@
-# AIzunda — Voice-chat AI pipeline with Zundamon
+# AIassistant — Voice-chat AI pipeline with Koteko
+
+> Voice: VOICEVOX:Zundamon
 
 A fully local stack that runs **voice → STT → LLM → TTS → VRM lip-sync** end-to-end
 on Ubuntu + AMD Ryzen AI Max+ 395 (ROCm). Click the 🎤 button in the browser and
-Zundamon answers you by voice.
+Koteko answers you by voice.
 
 ```
 Browser (three-vrm)
@@ -11,8 +13,8 @@ Browser (three-vrm)
     three-vrm server (port 8000)
          ↓ POST /voice_chat_stream
        ttllm bridge (port 8001)
-         ├─ WhisperX-ROCm (STT, large-v3)
-         └─ llama-server (Qwen3.6-35B-A3B, port 8080)
+         ├─ WhisperX-ROCm (STT, large-v3-turbo)
+         └─ llama-server (Qwen3.6-27B MTP, port 8080)
          ↓ SSE token stream
     three-vrm: split at sentence boundaries → VOICEVOX (port 50021) → WS broadcast
          ↓ WS (audio + visemes)
@@ -24,14 +26,14 @@ Browser (three-vrm)
 | Path | Role | Port |
 |---|---|---|
 | `voicevox/` | VOICEVOX Engine (Docker, CPU inference) | 50021 |
-| `~/AIzunda/llama.cpp/build/bin/llama-server` | Qwen3.6 inference | 8080 |
-| `qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | LLM weights | — |
+| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 inference (MTP speculative decoding) | 8080 |
+| `qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf` | LLM weights (includes 1 MTP layer) | — |
 | `ttllm/` | FastAPI bridge (WhisperX + llama.cpp) | 8001 |
 | `three-vrm/` | aiohttp server + VRM viewer (HTML/three-vrm) | 8000 |
 | `vtt/` | CLI PTT mic (optional) | — |
 | `images/` | VRM viewer background (rotates every 5 min) | — |
-| `zundavrm/VRM/Zundamon_2025_VRM10A.vrm` | Zundamon VRM 1.0 model | — |
-| `whisperX-rocm/` | WhisperX ROCm fork (venv at `~/AIzunda/whisperX-rocm/.venv`) | — |
+| `vroid/koteko.vrm` | Koteko VRM 1.0 model | — |
+| `whisperX-rocm/` | WhisperX ROCm fork (symlink to `~/AIzunda/whisperX-rocm`) | — |
 
 ### Prerequisites
 
@@ -50,23 +52,23 @@ See each subdirectory's `README.md` for detailed setup:
 ## Start / stop everything
 
 ```bash
-~/AIzunda/start_all.sh   # start everything + health checks + WhisperX warmup + open Chrome
-~/AIzunda/stop_all.sh    # stop the tmux session + VOICEVOX
-~/AIzunda/stop_all.sh --keep-voicevox   # leave the VOICEVOX container running
+~/AIassistant/start_all.sh   # start everything + health checks + WhisperX warmup + open Chrome
+~/AIassistant/stop_all.sh    # stop the tmux session + VOICEVOX
+~/AIassistant/stop_all.sh --keep-voicevox   # leave the VOICEVOX container running
 ```
 
-`start_all.sh` creates a tmux session named `aizunda` and runs each service in its own window.
+`start_all.sh` creates a tmux session named `aiassistant` and runs each service in its own window.
 
 | window | command |
 |---|---|
 | 0 voicevox | `docker logs -f voicevox_engine` |
-| 1 llama | `llama-server -m Qwen3.6... --port 8080 -ngl 99 -c 8192` |
+| 1 llama | `llama-server -m Qwen3.6-27B-MTP-Q8_0.gguf --port 8080 -ngl 99 -c 8192 --spec-type draft-mtp` |
 | 2 ttllm | `ttllm/run.sh` (uvicorn) |
 | 3 three-vrm | `python3 three-vrm/server.py` |
 | 4 vtt | `vtt/run.sh --device USB` (CLI PTT, optional) |
 
-Watch logs: `tmux attach -t aizunda`
-Shut everything down: `~/AIzunda/stop_all.sh`
+Watch logs: `tmux attach -t aiassistant`
+Shut everything down: `~/AIassistant/stop_all.sh`
 
 Startup order is serialized by dependency, with an HTTP health-check wait between
 stages (the llama-server model load has a 600-second timeout). Right after ttllm
@@ -80,7 +82,7 @@ first utterance isn't slow.
 3. The **🎤 button** at bottom-right
    - **Long-press (≥ 250 ms)**: records only while held, sends on release
    - **Short click**: starts recording → click again to send
-4. User speech appears as pale-blue subtitles; Zundamon's reply as white subtitles
+4. User speech appears as pale-blue subtitles; Koteko's reply as white subtitles
 
 ## Latency optimizations
 
@@ -114,7 +116,27 @@ Measured result (long 8-sentence reply):
 | Time to first audio | **3.32 s** | **1.06 s** |
 | Total completion | 3.32 s | 2.98 s |
 
-### 3. Cut previous speech when a new turn starts
+### 3. MTP (Multi-Token Prediction) speculative decoding
+
+Qwen3.6-27B ships with one MTP head, and llama.cpp supports it via
+`--spec-type draft-mtp`. The MTP head drafts up to 3 tokens ahead, and the
+target model advances by however many are accepted in one step.
+
+Measured (same gguf, identical prompt, 142 tokens generated, temp 0.7, seed 42):
+
+| Metric | MTP off | MTP on | Δ |
+|---|---|---|---|
+| Generation tokens/sec | 7.71 | **10.15** | **+31.7% (1.32x)** |
+| 142-token response time | 18.42 s | **13.99 s** | -24% |
+| TTFT (first token) | 0.46 s | 0.48 s | ≈ unchanged |
+| Draft acceptance | — | 24.7% (60/243) | — |
+
+**Important caveat**: MTP speeds up the **steady-state generation rate**, not the
+**time to first token**. Therefore "time to first audio" (already 1.06 s via
+streaming pipelining) is **not improved** by MTP. The win shows up in the
+*completion* of long replies; short replies see diminishing returns.
+
+### 4. Cut previous speech when a new turn starts
 
 When the mic is pressed, the client calls `stop(0)` on every scheduled
 `AudioBufferSourceNode` and clears the viseme queue (`stopAllPlayback`). It
@@ -125,7 +147,7 @@ instant.
 
 ### Random background rotation
 
-- Images are auto-discovered from `~/AIzunda/images/*.{jpg,png,webp}`
+- Images are auto-discovered from `~/AIassistant/images/*.{jpg,png,webp}` (override via `IMAGES_DIR` env)
 - `GET /images_list` returns the file list; `GET /images/<name>` serves them
 - One is picked at page load; **every 5 minutes** it switches to another random image (`zundamon.html`)
 - No images are bundled. Drop more images into the directory to add them (no server restart required)
@@ -195,27 +217,28 @@ to a natural standing position and bends the elbows about 14° (`zundamon.html`)
 
 All hardcoded paths in shell scripts and Python have been replaced with
 `$USER` / `os.path.expanduser("~/...")`. No `/home/<someone>` remains. To run
-as a different user, just keep the directory layout (`~/AIzunda/`,
-`~/AIzunda/llama.cpp/`, `~/AIzunda/whisperX-rocm/.venv/`) and it works.
+as a different user, just keep the directory layout (`~/AIassistant/`,
+`~/llama.cpp/`, `~/AIzunda/whisperX-rocm/.venv/`) and it works.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | 🎤 press produces no audio | Click the page to unlock AudioContext. Check mic permissions in the browser |
-| Zundamon stays silent / 500 errors | `tmux attach -t aizunda` to read ttllm logs. `curl :8001/health` to confirm llama reachability |
+| Koteko stays silent / 500 errors | `tmux attach -t aiassistant` to read ttllm logs. `curl :8001/health` to confirm llama reachability |
 | First utterance is slow | `curl -X POST :8001/warmup` to preload WhisperX |
 | Arms point the wrong way (after swapping VRM) | Flip the sign of `rotation.z` in `zundamon.html:applyRestPose` |
 | Background doesn't rotate | Check `/images_list` in DevTools. Reload the browser after dropping in new images |
 | VRM fails to load | Verify `server.py`'s `VRM_DIR` matches your filesystem. The filename must match `VRM_URL` in `zundamon.html` |
-| Stop everything | `~/AIzunda/stop_all.sh` |
+| Stop everything | `~/AIassistant/stop_all.sh` |
 
 ## Summary
 
-The goal: a cloud-free "Zundamon you can talk to", running fully locally on a
-single AMD Ryzen AI Max+ 395 + ROCm machine. With Qwen3.6-35B-A3B thinking-mode
-disabled and the LLM→TTS pipeline, first audio lands in about a second, and
-minimal code gives a non-jarring idle motion and background presentation.
+The goal: a cloud-free "Koteko you can talk to", running fully locally on a
+single AMD Ryzen AI Max+ 395 + ROCm machine. With Qwen3.6-27B (MTP) thinking-mode
+disabled, the LLM→TTS pipeline, and MTP speculative decoding, first audio lands
+in about a second and generation runs ~32% faster; minimal code adds a
+non-jarring idle motion and background presentation.
 
 Room for extension:
 

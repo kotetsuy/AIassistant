@@ -1,15 +1,15 @@
-# ずんだもん three-vrm サーバー
+# three-vrm サーバー (コテコ / VOICEVOX:ずんだもん)
 
-VOICEVOXの音声合成結果をWebSocketでブラウザに送り、`@pixiv/three-vrm` でVRM1.0モデル（ずんだもん）をリップシンク表示するスタンドアロンサーバー。
+VOICEVOX (ずんだもん声) の音声合成結果を WebSocket でブラウザに送り、`@pixiv/three-vrm` で VRM1.0 モデル (コテコ) をリップシンク表示するスタンドアロンサーバー。
 
 ## ディレクトリ構成
 
 ```
-~/AIzunda/three-vrm/
+~/AIassistant/three-vrm/
 ├── server.py                      # aiohttp サーバー（port 8000）
 ├── READMEJ.md
 └── TalkingHead/
-    ├── zundamon.html              # ビューア本体
+    ├── zundamon.html              # ビューア本体（ファイル名は履歴の都合で残置）
     └── libs/
         ├── three/
         │   ├── three.module.js    # r180 wrapper
@@ -28,10 +28,10 @@ VOICEVOXの音声合成結果をWebSocketでブラウザに送り、`@pixiv/thre
   docker start $(docker ps -aq --filter ancestor=voicevox/voicevox_engine:cpu-ubuntu20.04-latest)
   ```
 - **ttllm ブリッジ**（WhisperX + llama.cpp）が `localhost:8001` で稼働していること
-  （マイク入力機能を使う場合のみ必須。`~/AIzunda/ttllm/run.sh`）
-- **llama-server** が `localhost:8080` で稼働していること（ttllm の依存）
-- **ずんだもんVRM** が `/home/araki/AIzunda/zundavrm/VRM/Zundamon_2025_VRM10A.vrm` に配置されていること
-  （変更したい場合は `server.py` の `VRM_DIR` を書き換える）
+  （マイク入力機能を使う場合のみ必須。`~/AIassistant/ttllm/run.sh`）
+- **llama-server** が `localhost:8080` で稼働していること（ttllm の依存、MTP 投機デコード推奨）
+- **コテコ VRM** が `~/AIassistant/vroid/koteko.vrm` に配置されていること
+  （変更したい場合は `server.py` の `VRM_DIR` および `zundamon.html` の `VRM_URL` を書き換える）
 
 ## パイプライン全体像
 
@@ -54,7 +54,7 @@ three-vrm: moras → visemes 変換
 ## 起動
 
 ```bash
-cd ~/AIzunda/three-vrm
+cd ~/AIassistant/three-vrm
 python3 server.py
 ```
 
@@ -66,11 +66,11 @@ python3 server.py
 ```bash
 curl -X POST http://localhost:8000/speak \
   -H 'Content-Type: application/json' \
-  -d '{"text":"こんにちはなのだ","speaker_id":3}'
+  -d '{"text":"こんにちはアルヨ","speaker_id":3}'
 ```
 
 - `text` : 読み上げテキスト
-- `speaker_id` : ずんだもんのスタイル
+- `speaker_id` : VOICEVOX:ずんだもんのスタイル
   - 3: ノーマル
   - 1: あまあま
   - 7: ツンツン
@@ -135,7 +135,7 @@ await fetch("/voice_chat_speak", { method: "POST", body: fd });
 右下の 🎤 ボタン:
 - **長押し（250ms 以上）**: 押している間だけ録音（離すと送信）
 - **短クリック**: 録音開始 → もう一度クリックで送信
-- ユーザー発話は薄青の字幕、ずんだもんの返答は白字の字幕として表示
+- ユーザー発話は薄青の字幕、コテコの返答は白字の字幕として表示
 
 初回は画面を一度クリックして AudioContext とマイク権限を有効化してください。
 
@@ -156,4 +156,4 @@ VRMUtils.removeUnnecessaryJoints is deprecated. Use combineSkeletons instead.
 
 ## 次のステップ
 
-マイク入力 → WhisperX(STT) → llama-server Qwen3-35B-A3B → この `/speak` を叩く、というパイプライン連携スクリプトで完全な AI ずんだもんになる。
+マイク入力 → WhisperX(STT) → llama-server Qwen3.6-27B (MTP) → この `/speak` を叩く、というパイプライン連携スクリプトで完全な AIassistant になる。

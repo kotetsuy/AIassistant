@@ -1,7 +1,9 @@
-# AIzunda — ずんだもんと声で会話できる AI パイプライン
+# AIassistant — コテコと声で会話できる AI パイプライン
+
+> 音声: VOICEVOX:ずんだもん
 
 Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS → VRM リップシンク** を
-一気通貫で動かすローカルスタック。ブラウザの 🎤 ボタンを押すとずんだもんが声で返します。
+一気通貫で動かすローカルスタック。ブラウザの 🎤 ボタンを押すとコテコが声で返します。
 
 ```
 ブラウザ (three-vrm)
@@ -10,8 +12,8 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
     three-vrm サーバ (port 8000)
          ↓ POST /voice_chat_stream
        ttllm ブリッジ (port 8001)
-         ├─ WhisperX-ROCm (STT, large-v3)
-         └─ llama-server (Qwen3.6-35B-A3B, port 8080)
+         ├─ WhisperX-ROCm (STT, large-v3-turbo)
+         └─ llama-server (Qwen3.6-27B MTP, port 8080)
          ↓ SSE で token ストリーム
     three-vrm: 文境界で分割 → VOICEVOX (port 50021) → WS 配信
          ↓ WS (audio + visemes)
@@ -23,14 +25,14 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 | パス | 役割 | ポート |
 |---|---|---|
 | `voicevox/` | VOICEVOX Engine (Docker, CPU 推論) | 50021 |
-| `~/AIzunda/llama.cpp/build/bin/llama-server` | Qwen3.6 推論 | 8080 |
-| `qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | LLM モデル | — |
+| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 推論 (MTP 投機デコード対応) | 8080 |
+| `qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf` | LLM モデル (MTP 層 1 つ含む) | — |
 | `ttllm/` | FastAPI ブリッジ (WhisperX + llama.cpp) | 8001 |
 | `three-vrm/` | aiohttp サーバ + VRM ビューア (HTML/three-vrm) | 8000 |
 | `vtt/` | CLI PTT マイク (任意) | — |
 | `images/` | VRM ビューア背景 (5 分ごとにローテーション) | — |
-| `zundavrm/VRM/Zundamon_2025_VRM10A.vrm` | ずんだもん VRM 1.0 モデル | — |
-| `whisperX-rocm/` | WhisperX の ROCm フォーク (venv は `~/AIzunda/whisperX-rocm/.venv`) | — |
+| `vroid/koteko.vrm` | コテコ VRM 1.0 モデル | — |
+| `whisperX-rocm/` | WhisperX の ROCm フォーク (`~/AIzunda/whisperX-rocm` へのシンボリックリンク) | — |
 
 ### 前提
 
@@ -49,23 +51,23 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 ## 一括起動 / 停止
 
 ```bash
-~/AIzunda/start_all.sh   # 全段起動 + health check + WhisperX warmup + Chrome オープン
-~/AIzunda/stop_all.sh    # tmux セッション + VOICEVOX を停止
-~/AIzunda/stop_all.sh --keep-voicevox   # VOICEVOX コンテナは残す
+~/AIassistant/start_all.sh   # 全段起動 + health check + WhisperX warmup + Chrome オープン
+~/AIassistant/stop_all.sh    # tmux セッション + VOICEVOX を停止
+~/AIassistant/stop_all.sh --keep-voicevox   # VOICEVOX コンテナは残す
 ```
 
-`start_all.sh` は tmux セッション `aizunda` を作り、各サービスを別ウィンドウで走らせます。
+`start_all.sh` は tmux セッション `aiassistant` を作り、各サービスを別ウィンドウで走らせます。
 
 | window | コマンド |
 |---|---|
 | 0 voicevox | `docker logs -f voicevox_engine` |
-| 1 llama | `llama-server -m Qwen3.6... --port 8080 -ngl 99 -c 8192` |
+| 1 llama | `llama-server -m Qwen3.6-27B-MTP-Q8_0.gguf --port 8080 -ngl 99 -c 8192 --spec-type draft-mtp` |
 | 2 ttllm | `ttllm/run.sh` (uvicorn) |
 | 3 three-vrm | `python3 three-vrm/server.py` |
 | 4 vtt | `vtt/run.sh --device USB` (CLI PTT, 任意) |
 
-ログを見る: `tmux attach -t aizunda`  
-全部落とす: `~/AIzunda/stop_all.sh`
+ログを見る: `tmux attach -t aiassistant`  
+全部落とす: `~/AIassistant/stop_all.sh`
 
 起動順序は依存関係に合わせて直列化しており、各段で HTTP health check 待ちを入れています
 (llama-server のモデルロードだけ最大 600 秒タイムアウト)。ttllm が上がった直後に
@@ -78,7 +80,7 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 3. 右下の **🎤 ボタン**
    - **長押し (≥ 250ms)** : 押している間だけ録音、離すと送信
    - **短クリック** : 録音開始 → もう一度クリックで送信
-4. ユーザー発話は薄青の字幕、ずんだもんの返答は白の字幕として表示
+4. ユーザー発話は薄青の字幕、コテコの返答は白の字幕として表示
 
 ## レイテンシ最適化
 
@@ -109,7 +111,26 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 | 初音までの時間 | **3.32 s** | **1.06 s** |
 | 全体完了時間 | 3.32 s | 2.98 s |
 
-### 3. 新ターン開始時に前の発話を即停止
+### 3. MTP (Multi-Token Prediction) 投機デコード
+
+Qwen3.6-27B には MTP 層が 1 つ付属しており、llama.cpp の `--spec-type draft-mtp`
+で投機的デコードができます。MTP ヘッドが draft トークンを 3 つまで先読みし、
+ターゲットモデルが accept したぶんだけ 1 ステップで進めます。
+
+実測 (同じ gguf、同一プロンプト、142 トークン生成、温度 0.7、seed 42):
+
+| 指標 | MTP なし | MTP 有効 | 改善 |
+|---|---|---|---|
+| 生成 tokens/sec | 7.71 | **10.15** | **+31.7% (1.32x)** |
+| 142 トークン応答時間 | 18.42 s | **13.99 s** | -24% |
+| TTFT (初トークン) | 0.46 s | 0.48 s | ≒ 同等 |
+| Draft acceptance | — | 24.7% (60/243) | — |
+
+**重要な注意**: MTP は **生成中の速度** を上げる仕組みで、**TTFT (初トークン到達時間) は変わりません**。
+よって「初音までの時間」(streaming pipelining で 1.06 s 達成) は **MTP では短縮されず**、
+効果が出るのは「長文応答の完走時間」です。短い応答ほど効果が薄れます。
+
+### 4. 新ターン開始時に前の発話を即停止
 
 マイクを押した時点で、クライアントは現在スケジュール済みの全 `AudioBufferSourceNode` を
 `stop(0)` → viseme キューも消す、という処理を入れています (`stopAllPlayback`)。
@@ -119,7 +140,7 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 
 ### 背景ランダムローテーション
 
-- 画像は `~/AIzunda/images/*.{jpg,png,webp}` を自動検出
+- 画像は `~/AIassistant/images/*.{jpg,png,webp}` を自動検出 (環境変数 `IMAGES_DIR` で上書き可)
 - `GET /images_list` でファイル一覧、`GET /images/<name>` で配信
 - ページ読み込み時に 1 枚選択、**5 分ごと**にランダムで別の画像に切替 (`zundamon.html`)
 - 画像は同梱されていません。追加する場合はディレクトリに放り込むだけ (サーバ再起動不要)
@@ -188,7 +209,7 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 
 全 shell script / Python のハードコードパスは `$USER` / `os.path.expanduser("~/...")`
 に置換済で、`/home/<someone>` の決め打ちは残っていません。他ユーザーで動かす場合でも、
-`~/AIzunda/`, `~/llama.cpp/`, `~/venv/whisperx-rocm/` のディレクトリ構造さえ揃えれば
+`~/AIassistant/`, `~/llama.cpp/`, `~/AIzunda/whisperX-rocm/.venv/` のディレクトリ構造さえ揃えれば
 動きます。
 
 ## トラブルシュート
@@ -196,19 +217,19 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 | 現象 | 対処 |
 |---|---|
 | 🎤 を押しても無音 | 画面をクリックして AudioContext を有効化。ブラウザの mic 権限も確認 |
-| ずんだもんが喋らない / 500 エラー | `tmux attach -t aizunda` で ttllm のログ確認。`curl :8001/health` で llama 到達性もチェック |
+| コテコが喋らない / 500 エラー | `tmux attach -t aiassistant` で ttllm のログ確認。`curl :8001/health` で llama 到達性もチェック |
 | 初回発話が遅い | `curl -X POST :8001/warmup` で WhisperX 先読み |
 | 腕の向きがおかしい (VRM 差し替え時) | `zundamon.html:applyRestPose` の `rotation.z` 符号を反転 |
 | 背景が切り替わらない | DevTools console で `/images_list` のレスポンスを確認。画像を置いたらブラウザリロード |
 | VRM が読めない | `server.py` の `VRM_DIR` と実ファイルパスを確認。ファイル名は `zundamon.html` の `VRM_URL` に一致させる |
-| 全部止めたい | `~/AIzunda/stop_all.sh` |
+| 全部止めたい | `~/AIassistant/stop_all.sh` |
 
 ## まとめ
 
-ローカル完結で、クラウド API に依存しない「声で会話できるずんだもん」を、
+ローカル完結で、クラウド API に依存しない「声で会話できるコテコ」を、
 AMD Ryzen AI Max+ 395 + ROCm のワンマシン上で動かすことをゴールにしています。
-Qwen3.6-35B-A3B の thinking 抑制と LLM→TTS のパイプライン化で、
-初音まで約 1 秒、違和感のない待機モーションと背景演出を最小コードで付けています。
+Qwen3.6-27B (MTP) の thinking 抑制、LLM→TTS パイプライン化、MTP 投機デコードで、
+初音まで約 1 秒・生成速度 +32% を達成しつつ、違和感のない待機モーションと背景演出を最小コードで付けています。
 
 拡張の余地は以下あたりです。
 
