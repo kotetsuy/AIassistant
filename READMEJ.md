@@ -73,6 +73,10 @@ git clone https://github.com/<your_ctranslate2_rocm_fork>/ctranslate2-rocm.git
 
 > :pencil: 実機では `whisperX-rocm` を `~/AIzunda/whisperX-rocm` に置いていますが、新規構築する場合は `~/whisperx/whisperX-rocm` でも構いません。AIassistant 側の `whisperX-rocm` は **シンボリックリンク** なので、リンク先は環境に合わせて貼り直してください。
 
+こちらも参照してください
+
+https://qiita.com/kotetsu_yama/items/449e0d0527ab3a233fb8
+
 ---
 
 ## 2. CTranslate2-ROCm をソースビルド
