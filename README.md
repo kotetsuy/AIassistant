@@ -41,7 +41,7 @@ Browser (three-vrm)
 ### Prerequisites
 
 - **OS** : Ubuntu 24.04.4 LTS
-- **GPU** : AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1151, 48GB VRAM)
+- **GPU** : AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1150, 48GB VRAM)
 - **ROCm** : 7.2.1 (`/opt/rocm`)
 - **Python** : 3.12.3
 - **Docker** : 29.x (for VOICEVOX)
@@ -91,11 +91,11 @@ Build the CTranslate2 backend that `faster-whisper` calls, with ROCm/HIP support
 cd ~/whisperx/ctranslate2-rocm
 mkdir -p build && cd build
 
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
-export AMDGPU_TARGETS=gfx1151
+export HSA_OVERRIDE_GFX_VERSION=11.5.0
+export AMDGPU_TARGETS=gfx1150
 
 cmake .. -DWITH_HIP=ON -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
-  -DCMAKE_HIP_ARCHITECTURES=gfx1151 -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_HIP_ARCHITECTURES=gfx1150 -DCMAKE_BUILD_TYPE=Release \
   -DOPENMP_RUNTIME=COMP \
   -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
@@ -141,10 +141,10 @@ cd ~/llama.cpp
 git pull --ff-only origin master
 
 mkdir -p build && cd build
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
-export AMDGPU_TARGETS=gfx1151
+export HSA_OVERRIDE_GFX_VERSION=11.5.0
+export AMDGPU_TARGETS=gfx1150
 
-cmake .. -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1151 \
+cmake .. -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1150 \
   -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)

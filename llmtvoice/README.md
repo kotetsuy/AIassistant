@@ -87,7 +87,7 @@ individual README (`whisperX-rocm` / `ttllm` / `voicevox` / `three-vrm`).
 | Item    | Requirement |
 | ------- | ----------- |
 | OS      | Ubuntu 24.04 LTS |
-| GPU     | AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1151, 48 GB VRAM) |
+| GPU     | AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1150, 48 GB VRAM) |
 | ROCm    | 7.2.0 (`/opt/rocm`) |
 | Python  | 3.12.3 |
 | Docker  | 29.x (for VOICEVOX) |
@@ -95,7 +95,7 @@ individual README (`whisperX-rocm` / `ttllm` / `voicevox` / `three-vrm`).
 
 ROCm env vars are set inside each `run.sh`. For manual launches:
 ```bash
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
+export HSA_OVERRIDE_GFX_VERSION=11.5.0
 export ROCM_PATH=/opt/rocm
 export HIP_VISIBLE_DEVICES=0
 export LD_LIBRARY_PATH=/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:$LD_LIBRARY_PATH
@@ -109,7 +109,7 @@ export LD_LIBRARY_PATH=/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:$LD_L
 ```bash
 cd ~/AIzunda/ctranslate2-rocm/build
 cmake .. -DWITH_HIP=ON -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
-  -DCMAKE_HIP_ARCHITECTURES=gfx1151 -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_HIP_ARCHITECTURES=gfx1150 -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_C_COMPILER=/opt/rocm/lib/llvm/bin/clang \
