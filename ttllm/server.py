@@ -1,6 +1,8 @@
 import json
+import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -16,6 +18,9 @@ WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")
 WHISPER_BATCH_SIZE = int(os.getenv("WHISPER_BATCH_SIZE", "8"))
 WHISPER_VAD_METHOD = os.getenv("WHISPER_VAD_METHOD", "silero")
+
+# uvicorn 配下なので uvicorn.error ロガーに乗せれば tmux の ttllm ウィンドウに出る。
+logger = logging.getLogger("uvicorn.error")
 
 LLAMA_SERVER_URL = os.getenv("LLAMA_SERVER_URL", "http://localhost:8080").rstrip("/")
 LLAMA_TIMEOUT = float(os.getenv("LLAMA_TIMEOUT", "120"))
@@ -97,14 +102,20 @@ def _transcribe_path(path: str) -> str:
     model = get_model()
     wx = _load_whisperx()
     audio = wx.load_audio(path)
+    audio_sec = len(audio) / 16000  # whisperx は 16kHz mono で読む
+    t0 = time.perf_counter()
     try:
         result = model.transcribe(audio, batch_size=WHISPER_BATCH_SIZE)
     except IndexError:
         # Silero VAD が発話なしと判定すると WhisperX 内部で inputs[0] が
         # IndexError を投げる。無音扱いで空文字を返す。
         return ""
+    stt_ms = (time.perf_counter() - t0) * 1000
     segments = result.get("segments", []) if isinstance(result, dict) else []
-    return "".join(seg.get("text", "") for seg in segments).strip()
+    text = "".join(seg.get("text", "") for seg in segments).strip()
+    rtf = stt_ms / 1000 / audio_sec if audio_sec else 0
+    logger.info("STT %.0fms (audio %.2fs, RTF %.2f): %r", stt_ms, audio_sec, rtf, text[:40])
+    return text
 
 
 async def _save_upload(upload: UploadFile) -> str:
@@ -287,6 +298,9 @@ async def voice_chat_stream(
         }
 
         reply_parts: List[str] = []
+        llm_t0 = time.perf_counter()
+        ttft_ms: Optional[float] = None
+        n_chunks = 0
         try:
             async with httpx.AsyncClient(timeout=LLAMA_TIMEOUT) as client:
                 async with client.stream(
@@ -311,10 +325,24 @@ async def voice_chat_stream(
                             continue
                         text = delta.get("content") or ""
                         if text:
+                            if ttft_ms is None:
+                                ttft_ms = (time.perf_counter() - llm_t0) * 1000
+                            n_chunks += 1
                             reply_parts.append(text)
                             yield _sse({"type": "token", "text": text})
         except httpx.HTTPError as e:
             yield _sse({"type": "error", "error": f"llama-server: {e}"})
+
+        gen_ms = (time.perf_counter() - llm_t0) * 1000
+        if ttft_ms is not None and n_chunks > 1 and gen_ms > ttft_ms:
+            tps = (n_chunks - 1) / ((gen_ms - ttft_ms) / 1000)
+        else:
+            tps = 0.0
+        logger.info(
+            "LLM TTFT %sms, total %.0fms, %d chunks, %.1f chunk/s",
+            f"{ttft_ms:.0f}" if ttft_ms is not None else "n/a",
+            gen_ms, n_chunks, tps,
+        )
 
         yield _sse({"type": "done", "reply": "".join(reply_parts)})
 
