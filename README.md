@@ -395,6 +395,12 @@ Measured (same gguf, same prompt, 142 tokens generated, temperature 0.7, seed 42
 thanks to the streaming pipeline) is **not improved by MTP**; the gain shows up in
 "total completion time for long responses". The shorter the reply, the smaller the effect.
 
+> **On bandwidth-limited iGPUs, the MoE model is much faster.** On a smaller chip such as
+> the Ryzen AI HX 370 (16 CU, ~120 GB/s, 32GB unified), MTP gives no benefit and the dense
+> 27B is slow. Switching (back) to the **Qwen3.6-35B-A3B (Q4_K_XL, ~21GB)** MoE model — only
+> ~3B active parameters per token — is dramatically faster there: **TTFT ~88 ms (vs ~360 ms)
+> and ~19.8 tok/s (vs ~5.0)**, roughly 4x on both. `start_all.sh` points at this model.
+
 ### 5. Stop the previous utterance immediately when a new turn starts
 
 The moment the mic is pressed, the client `stop(0)`s every currently scheduled
