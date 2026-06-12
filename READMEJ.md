@@ -16,26 +16,35 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
          ↓ POST /voice_chat_stream
        ttllm ブリッジ (port 8001)
          ├─ WhisperX-ROCm (STT, large-v3-turbo)
-         └─ llama-server (Qwen3.6-27B MTP, port 8080)
+         └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
          ↓ SSE で token ストリーム
     three-vrm: 文境界で分割 → VOICEVOX (port 50021) → WS 配信
          ↓ WS (audio + visemes)
  ブラウザ: AudioContext 連続再生 + VRM リップシンク + 背景 + idle motion
 ```
 
+> **技術的な詳細（レイテンシ最適化、MTP と MoE の選択、エンドポイント仕様、VRM 演出、
+> 既知の制約、トラブルシュート）は [`TECHNICALJ.md`](./TECHNICALJ.md) にまとめています。**
+> こちらは「git clone から `./start_all.sh` でコテコが喋るまで」の手順書です。
+
 ## 構成
 
 | パス | 役割 | ポート |
 |---|---|---|
 | `voicevox/` | VOICEVOX Engine (Docker, CPU 推論) | 50021 |
-| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 推論 (MTP 投機デコード対応) | 8080 |
-| `qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf` | LLM モデル (MTP 層 1 つ含む) | — |
+| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 推論 (MoE, アクティブ約 3B) | 8080 |
+| `qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | LLM モデル (MoE, 約 21GB) | — |
+| `qwen3.6/mmproj-F16.gguf` | 視覚エンコーダ (任意、マルチモーダル用) | — |
 | `ttllm/` | FastAPI ブリッジ (WhisperX + llama.cpp) | 8001 |
 | `three-vrm/` | aiohttp サーバ + VRM ビューア (HTML/three-vrm) | 8000 |
 | `vtt/` | CLI PTT マイク (任意) | — |
 | `images/` | VRM ビューア背景 (5 分ごとにローテーション) | — |
 | `vroid/koteko.vrm` | コテコ VRM 1.0 モデル | — |
 | `whisperX-rocm/` | WhisperX の ROCm フォーク (`~/AIzunda/whisperX-rocm` へのシンボリックリンク) | — |
+
+> :pencil: 現在の既定 LLM は **Qwen3.6-35B-A3B (MoE)** です。以前は dense な
+> Qwen3.6-27B + MTP 投機デコードを使っていましたが、帯域が細い iGPU では MoE の方が
+> 速いため切り替えました。経緯と実測は [`TECHNICALJ.md`](./TECHNICALJ.md) を参照。
 
 ### 前提
 
@@ -126,9 +135,10 @@ uv pip install --reinstall pybind11 ~/whisperx/ctranslate2-rocm/python
 
 ---
 
-## 4. llama.cpp を **MTP 対応の最新 master** でビルド
+## 4. llama.cpp を ROCm 対応でビルド
 
-Qwen3.5/3.6 系の **MTP (Multi-Token Prediction)** サポートは PR [#22673](https://github.com/ggml-org/llama.cpp/pull/22673) でマージされたばかりです (2026-05 時点)。後半 [§3](#3-mtp-投機デコードの仕組みと効果) で使うので、master 最新を pull してください。
+Qwen3.6-35B-A3B は **MoE + Mamba ハイブリッド** なので、対応済みの新しめの llama.cpp が必要です。
+master 最新を pull してビルドしてください。
 
 ```bash
 cd ~/llama.cpp
@@ -149,35 +159,36 @@ make -j$(nproc)
 ```bash
 ./bin/llama-server --version
 # version: 9294 (...) など
-
-./bin/llama-server --help | grep -A2 spec-type
-# --spec-type none,draft-simple,draft-eagle3,draft-mtp,...
 ```
 
-`draft-mtp` が出てくれば MTP 対応版です。
+> :bulb: いまの既定構成 (MoE) は MTP 投機デコードを使いません。dense な Qwen3.6-27B + MTP を
+> 試したい場合のみ、`--spec-type draft-mtp` 対応の master が要ります。詳細は
+> [`TECHNICALJ.md`](./TECHNICALJ.md) の「MTP と MoE の選択」を参照。
 
 ---
 
-## 5. Qwen3.6 MTP モデルをダウンロード
+## 5. Qwen3.6-35B-A3B (MoE) モデルをダウンロード
 
-`hf` (huggingface CLI、旧 `huggingface-cli`) でモデルを取得します:
+`hf` (huggingface CLI、旧 `huggingface-cli`) でモデルを取得します。Unsloth Dynamic の
+Q4_K_XL 量子化を使います:
 
 ```bash
 mkdir -p ~/qwen3.6
-hf download am17an/Qwen3.6-27B-MTP-GGUF Qwen3.6-27B-MTP-Q8_0.gguf \
+hf download unsloth/Qwen3.6-35B-A3B-GGUF \
+  Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf mmproj-F16.gguf \
   --local-dir ~/qwen3.6
 ```
 
-29 GB あります。MTP 層を含むことを確認:
+メインモデルは約 21GB、視覚エンコーダ (`mmproj-F16.gguf`、約 858MB) はマルチモーダルを
+使う場合のみ必要です。確認:
 
 ```bash
-cd ~/llama.cpp
-python3 gguf-py/gguf/scripts/gguf_dump.py --no-tensors \
-  ~/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf | grep -E "nextn|architecture"
-# → qwen35.nextn_predict_layers = 1
+ls -lh ~/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+# 約 20.8 GiB
 ```
 
-`nextn_predict_layers = 1` が出れば MTP 層入り gguf です。
+> アクティブパラメータは 1 トークンあたり約 3B 相当なので、総 34.66B の割に高速です
+> (Ryzen AI Max+ 395 で tg128 ≈ 50 t/s)。詳細なベンチは `qwen3.6/READMEJ.md` を参照。
 
 ---
 
@@ -257,7 +268,7 @@ cd ~/AIassistant
 以下が直列で立ち上がり、HTTP health check で待ち合わせます:
 
 1. VOICEVOX (Docker, port 50021)
-2. llama-server (Qwen3.6-27B-MTP, port 8080, `--spec-type draft-mtp` 付き)
+2. llama-server (Qwen3.6-35B-A3B MoE, port 8080)
 3. ttllm ブリッジ (port 8001)
 4. WhisperX warmup (`POST /warmup` を叩いて初回のモデルロードを済ませる)
 5. three-vrm サーバ (port 8000)
@@ -297,7 +308,7 @@ tmux attach -t aiassistant   # ログを見る
 | window | コマンド |
 |---|---|
 | 0 voicevox | `docker logs -f voicevox_engine` |
-| 1 llama | `llama-server -m Qwen3.6-27B-MTP-Q8_0.gguf --port 8080 -ngl 99 -c 8192 --spec-type draft-mtp` |
+| 1 llama | `llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --port 8080 -ngl 99 -c 8192 -fit off` |
 | 2 ttllm | `ttllm/run.sh` (uvicorn) |
 | 3 three-vrm | `python3 three-vrm/server.py` |
 | 4 vtt | `vtt/run.sh --device USB` (CLI PTT, 任意) |
@@ -318,179 +329,11 @@ tmux attach -t aiassistant   # ログを見る
    - **短クリック** : 録音開始 → もう一度クリックで送信
 4. ユーザー発話は薄青の字幕、コテコの返答は白の字幕として表示
 
-## レイテンシ最適化
+## 次に読むもの
 
-短い発話 (「こんにちは」程度) で体感 1 秒前後、長文応答でも**初音 1 秒台**を目標にしています。
-
-### 1. Qwen3 thinking モードを切る
-
-既定で Qwen3 は返答前に `reasoning_content` (内部独白) を数百トークン吐き、
-これで数秒の体感遅延が出ます。ttllm から llama-server に
-`chat_template_kwargs: {"enable_thinking": false}` を渡して無効化しています
-(`ttllm/server.py:_call_llama`)。この 1 行だけで LLM 段を 4〜8 秒短縮。
-
-### 2. LLM → VOICEVOX のパイプライン化
-
-- ttllm に `/voice_chat_stream` (SSE) を追加し、llama-server を `stream: true` で叩いて
-  `{transcript}` → `{token}×N` → `{done}` の流れで返す。
-- three-vrm の `/voice_chat_speak_stream` が SSE を消費。`[。！？\n]` で文分割、
-  長文保険で 60 文字超は `[、]` でも切る。TTS は `asyncio.Queue` + consumer task で
-  直列化 (WS 順序保証)、LLM デコードは並列継続。
-- クライアントは `turn_start` で playhead をリセット、各 `speak` チャンクを
-  `startAt = max(playheadTime, now)` でキュー末尾に連続再生。viseme は絶対時刻で
-  スケジュールするので複数チャンクでも干渉しない。
-
-結果 (実測、長文 8 文応答):
-
-| 指標 | 改善前 (非streaming) | 改善後 (pipeline) |
-|---|---|---|
-| 初音までの時間 | **3.32 s** | **1.06 s** |
-| 全体完了時間 | 3.32 s | 2.98 s |
-
-### 3. WhisperX を large-v3 → large-v3-turbo に変更
-
-STT 段を turbo モデルに切り替えると、転写時間がほぼ半減します。`/warmup` 済みの
-steady state で測定 (2.56 秒の音声サンプル、float16、batch 8、Silero VAD):
-
-| 指標 | large-v3 | large-v3-turbo | 改善 |
-|---|---|---|---|
-| 転写時間 (steady median) | 474 ms | **247 ms** | **-48% (1.92x 速い)** |
-| 転写時間 (cold first) | 664 ms | 440 ms | -34% |
-| モデルロード | 6.51 s | 4.83 s | -26% |
-
-**「最初の発話」への効果**: STT 段が **約 227 ms 短縮** されるので、初音までの時間が
-そのぶん早くなります (TTFT に効く)。認識精度は同等(短文では同じテキストを返す)。
-
-### 4. MTP (Multi-Token Prediction) 投機デコード
-
-Qwen3.6-27B には MTP 層が 1 つ付属しており、llama.cpp の `--spec-type draft-mtp`
-で投機的デコードができます。MTP ヘッドが draft トークンを 3 つまで先読みし、
-ターゲットモデルが accept したぶんだけ 1 ステップで進めます。
-
-実測 (同じ gguf、同一プロンプト、142 トークン生成、温度 0.7、seed 42):
-
-| 指標 | MTP なし | MTP 有効 | 改善 |
-|---|---|---|---|
-| 生成 tokens/sec | 7.71 | **10.15** | **+31.7% (1.32x)** |
-| 142 トークン応答時間 | 18.42 s | **13.99 s** | -24% |
-| TTFT (初トークン) | 0.46 s | 0.48 s | ≒ 同等 |
-| Draft acceptance | — | 24.7% (60/243) | — |
-
-**重要な注意**: MTP は **生成中の速度** を上げる仕組みで、**TTFT (初トークン到達時間) は変わりません**。
-よって「初音までの時間」(streaming pipelining で 1.06 s 達成) は **MTP では短縮されず**、
-効果が出るのは「長文応答の完走時間」です。短い応答ほど効果が薄れます。
-
-> **帯域が細い iGPU では MoE モデルの方が断然速い。** Ryzen AI HX 370 (16 CU, 約120 GB/s, 32GB)
-> のような小型チップでは MTP の効果が無く、dense な 27B は遅い。1 トークンあたりアクティブ約 3B
-> パラメータのみの **Qwen3.6-35B-A3B (Q4_K_XL, 約21GB)** MoE モデルに戻すと劇的に速くなる:
-> **TTFT 約 88 ms (vs 約 360 ms)、約 19.8 tok/s (vs 約 5.0)** で両方およそ 4 倍。
-> `start_all.sh` はこのモデルを指している。
-
-### 5. 新ターン開始時に前の発話を即停止
-
-マイクを押した時点で、クライアントは現在スケジュール済みの全 `AudioBufferSourceNode` を
-`stop(0)` → viseme キューも消す、という処理を入れています (`stopAllPlayback`)。
-サーバの `turn_start` 到着を待たないので体感が即応。
-
-## VRM ビューアの演出
-
-### 背景ランダムローテーション
-
-- 画像は `~/AIassistant/images/*.{jpg,png,webp}` を自動検出 (環境変数 `IMAGES_DIR` で上書き可)
-- `GET /images_list` でファイル一覧、`GET /images/<name>` で配信
-- ページ読み込み時に 1 枚選択、**5 分ごと**にランダムで別の画像に切替 (`zundamon.html`)
-- 画像は同梱されていません。追加する場合はディレクトリに放り込むだけ (サーバ再起動不要)
-
-### Idle モーション
-
-T-pose 棒立ちを避けるため、毎フレーム微小な回転を加えています
-(`zundamon.html:applyIdlePose`)。
-
-| 部位 | 周波数 | 振幅 |
-|---|---|---|
-| spine / chest (X 軸、呼吸) | 0.25 Hz | ±0.7° |
-| spine / chest (Z 軸、左右揺れ) | 0.13 Hz (位相違い) | ±1.1° |
-| head (X 軸) | 0.10 Hz | ±0.9° |
-| head (Y 軸) | 0.08 Hz | ±1.7° |
-
-`vrm.update(delta)` の前にポーズを設定しているので、VRM の spring bones (髪・スカート等)
-が自然に二次追従します。
-
-### 両手を下ろす
-
-VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()` で
-両腕を自然立ちの位置に落とし、肘も約 14° 曲げています (`zundamon.html`)。
-
-## 主要エンドポイント
-
-### ttllm (port 8001)
-
-| メソッド | パス | 用途 |
-|---|---|---|
-| GET | `/health` | 自身 + llama-server 到達性 |
-| POST | `/warmup` | WhisperX モデル先読み |
-| POST | `/transcribe` | 音声 → テキスト |
-| POST | `/chat` | テキスト → LLM 応答 (非streaming) |
-| POST | `/voice_chat` | 音声 → 応答 (非streaming) |
-| POST | `/voice_chat_stream` | 音声 → SSE (transcript + token + done) **new** |
-
-### three-vrm (port 8000)
-
-| メソッド | パス | 用途 |
-|---|---|---|
-| GET | `/zundamon.html` | ビューア |
-| GET | `/ws` | WebSocket (turn_start / speak / turn_end / transcript / error) |
-| POST | `/speak` | テキスト指定で発話 |
-| POST | `/voice_chat_speak` | 音声 → ワンショット応答 (非streaming) |
-| POST | `/voice_chat_speak_stream` | 音声 → パイプライン応答 **new** |
-| GET | `/images_list` | 背景画像一覧 |
-| GET | `/images/{name}` | 背景画像配信 |
-| GET | `/vrm/{name}` | VRM ファイル配信 |
-| GET | `/status` | クライアント数 |
-
-## 既知の制約
-
-- **WhisperX は 60 秒超で GPU memory fault** (ROCm 7.x + PyTorch nightly の既知問題)。
-  vtt は VAD で 55 秒に強制カットして回避しています。ブラウザ側の録音も長尺は避けてください。
-- **無音発話で以前 500 エラー** が出ていましたが、Silero VAD が "No active speech" を
-  返したときの WhisperX IndexError を `_transcribe_path` で捕捉して空文字に落とすように
-  修正済 (`ttllm/server.py`)。
-- **VOICEVOX は CPU 推論**。ROCm との VRAM 競合を避けるための選択で、
-  短文なら十分リアルタイム。長文では合成が律速になる可能性あり。
-- **Chrome の AudioContext** は初回クリックが必須 (user-gesture 要件)。
-- **Qwen3 の thinking** は ttllm 経由では常に OFF ですが、llama-server を直叩きする場合は
-  `chat_template_kwargs` を自分で付与する必要があります。
-
-## パスについて
-
-全 shell script / Python のハードコードパスは `$USER` / `os.path.expanduser("~/...")`
-に置換済で、`/home/<someone>` の決め打ちは残っていません。他ユーザーで動かす場合でも、
-`~/AIassistant/`, `~/llama.cpp/`, `~/AIzunda/whisperX-rocm/.venv/` のディレクトリ構造さえ揃えれば
-動きます。
-
-## トラブルシュート
-
-| 現象 | 対処 |
-|---|---|
-| 🎤 を押しても無音 | 画面をクリックして AudioContext を有効化。ブラウザの mic 権限も確認 |
-| コテコが喋らない / 500 エラー | `tmux attach -t aiassistant` で ttllm のログ確認。`curl :8001/health` で llama 到達性もチェック |
-| 初回発話が遅い | `curl -X POST :8001/warmup` で WhisperX 先読み |
-| 腕の向きがおかしい (VRM 差し替え時) | `zundamon.html:applyRestPose` の `rotation.z` 符号を反転 |
-| 背景が切り替わらない | DevTools console で `/images_list` のレスポンスを確認。画像を置いたらブラウザリロード |
-| VRM が読めない | `server.py` の `VRM_DIR` と実ファイルパスを確認。ファイル名は `zundamon.html` の `VRM_URL` に一致させる |
-| 全部止めたい | `~/AIassistant/stop_all.sh` |
-
-## まとめ
-
-ローカル完結で、クラウド API に依存しない「声で会話できるコテコ」を、
-AMD Ryzen AI Max+ 395 + ROCm のワンマシン上で動かすことをゴールにしています。
-Qwen3.6-27B (MTP) の thinking 抑制、LLM→TTS パイプライン化、MTP 投機デコードで、
-初音まで約 1 秒・生成速度 +32% を達成しつつ、違和感のない待機モーションと背景演出を最小コードで付けています。
-
-拡張の余地は以下あたりです。
-
-- 会話履歴の保持 (現在は毎ターンステートレス、`history` パラメタで渡すだけ)
-- VRMA 形式の idle アニメ読み込み (現在はプロシージャル)
-- VOICEVOX を GPU ビルドに差し替え (長文応答の合成を高速化)
-- smaller STT model への切替 (medium で 200〜300 ms 短縮可能)
-- LLM ストリーミング中の手振りジェスチャ連動
+- **技術解説 / チューニング**: [`TECHNICALJ.md`](./TECHNICALJ.md)
+  (レイテンシ最適化、MTP と MoE の選択、エンドポイント仕様、VRM 演出、既知の制約、トラブルシュート、まとめ)
+- 各コンポーネントの詳細: `ttllm/READMEJ.md` / `three-vrm/READMEJ.md` /
+  `voicevox/READMEJ.md` / `vtt/READMEJ.md` / `qwen3.6/READMEJ.md`
+</content>
+</invoke>
