@@ -42,7 +42,7 @@ Browser (three-vrm)
 | `vtt/` | CLI PTT mic (optional) | — |
 | `images/` | VRM viewer backgrounds (rotated every 5 minutes) | — |
 | `vroid/koteko.vrm` | Koteko VRM 1.0 model | — |
-| `whisperX-rocm/` | ROCm fork of WhisperX (symlink to `~/AIzunda/whisperX-rocm`) | — |
+| `whisperX-rocm/` | ROCm fork of WhisperX (symlink to `~/whisperx/whisperX-rocm`) | — |
 
 > :pencil: The current default LLM is **Qwen3.6-35B-A3B (MoE)**. We previously used a dense
 > Qwen3.6-27B with MTP speculative decoding, but switched because the MoE model is faster on
@@ -51,10 +51,12 @@ Browser (three-vrm)
 
 ### Prerequisites
 
-- **OS** : Ubuntu 24.04.4 LTS
+- **OS** : Ubuntu 26.04 (resolute)
 - **GPU** : AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1151, 48GB VRAM)
-- **ROCm** : 7.2.1 (`/opt/rocm`)
-- **Python** : 3.12.3
+- **ROCm** : 7.14.0 (`/opt/rocm`). On Ubuntu 26.04 it can be installed natively via apt
+  (`amdrocm-core-sdk7.14-gfx1151` from `repo.amd.com/rocm/packages-multi-arch/ubuntu2604`).
+  The in-tree amdgpu kernel driver already supports gfx1151, so DKMS / `amdgpu-install` are not needed.
+- **Python** : system 3.14 / each venv is 3.12 (pinned via `.python-version`)
 - **Docker** : 29.x (for VOICEVOX)
 - **Browser** : Google Chrome (Firefox also works since it uses `AudioContext`)
 - **tmux / curl / uv / huggingface_hub (hf CLI)** : used by the startup script
@@ -84,9 +86,11 @@ git clone https://github.com/<your_whisperx_rocm_fork>/whisperX-rocm.git
 git clone https://github.com/<your_ctranslate2_rocm_fork>/ctranslate2-rocm.git
 ```
 
-> :pencil: On the actual machine, `whisperX-rocm` is placed at `~/AIzunda/whisperX-rocm`,
-> but for a fresh setup `~/whisperx/whisperX-rocm` works just as well. The `whisperX-rocm`
-> entry inside AIassistant is a **symlink**, so re-point it to match your environment.
+> :pencil: `whisperX-rocm` is placed at `~/whisperx/whisperX-rocm` (the `whisperX-rocm` entry
+> inside AIassistant is a symlink to it). ttllm's `run.sh` / `install.sh` default to this path
+> as well. It previously lived at `~/AIzunda/whisperX-rocm`, but after the OS upgrade
+> (Ubuntu 26.04 / system python 3.14) the old venv's interpreter broke, so we consolidated on
+> `~/whisperx`. To change the target, update both `ln -sfn <path> whisperX-rocm` and `WHISPERX_VENV`.
 
 Refer to this URL also:
 
@@ -107,15 +111,19 @@ export AMDGPU_TARGETS=gfx1151
 
 cmake .. -DWITH_HIP=ON -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
   -DCMAKE_HIP_ARCHITECTURES=gfx1151 -DCMAKE_BUILD_TYPE=Release \
-  -DOPENMP_RUNTIME=COMP \
+  -DOPENMP_RUNTIME=COMP -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_C_COMPILER=/opt/rocm/lib/llvm/bin/clang \
   -DCMAKE_PREFIX_PATH=/opt/rocm -DBUILD_CLI=OFF
-make -j$(nproc) && sudo make install
+make -j$(nproc) && sudo make install && sudo ldconfig
 ```
 
 If `/usr/local/lib/libctranslate2.so` is installed, the build succeeded.
+
+> :warning: With CMake 4.x the bundled `third_party/cpu_features` declares a
+> `cmake_minimum_required` that is too old and configure fails. The
+> `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` above is required.
 
 ---
 
@@ -123,13 +131,28 @@ If `/usr/local/lib/libctranslate2.so` is installed, the build succeeded.
 
 ```bash
 cd ~/whisperx/whisperX-rocm
-uv venv && uv pip install -e .
+uv venv && uv pip install -e .   # venv is 3.12 via .python-version
+
+# `uv pip install -e .` pulls the NVIDIA CUDA build of torch by default, so
+# replace it with the gfx1151-specific ROCm wheels (see the warning below)
+uv pip uninstall torch torchaudio
+uv pip install \
+  --index-url https://repo.amd.com/rocm/whl/gfx1151/ \
+  --extra-index-url https://pypi.org/simple \
+  --index-strategy unsafe-best-match --prerelease allow \
+  torch==2.8.0+rocm7.12.0 torchaudio==2.8.0a0+rocm7.12.0
 
 # Reinstall the Python bindings of the ROCm build of ctranslate2
 rm -rf .venv/lib/python3.12/site-packages/ctranslate2*
 export CTRANSLATE2_ROOT=/usr/local
-uv pip install --reinstall pybind11 ~/whisperx/ctranslate2-rocm/python
+uv pip install --reinstall --no-deps pybind11 ~/whisperx/ctranslate2-rocm/python
 ```
+
+> :warning: **Use the gfx1151-specific index for PyTorch (ROCm).** The generic
+> `whl-multi-arch` build fails at runtime with `hipErrorInvalidImage`
+> (`kpack_load_code_object failed`) on every GPU op. Also pin **torchaudio to < 2.9**
+> (pyannote uses `torchaudio.info` / `AudioMetaData`, removed in 2.9). These wheels have no
+> cp310, so the venv must be Python 3.11+.
 
 Verify:
 
@@ -224,7 +247,18 @@ cd ~/AIassistant/ttllm
 ```
 
 This **adds `fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` to the
-WhisperX-ROCm venv** (no dedicated venv is created — the venv is shared).
+WhisperX-ROCm venv** (no dedicated venv is created — the venv is shared). `install.sh` /
+`run.sh` default to `~/whisperx/whisperX-rocm/.venv` (override with `WHISPERX_VENV`).
+
+> :warning: **Run three-vrm with the same venv's python.** `start_all.sh` launches it as
+> `python3 server.py` (system python), but system python has no `aiohttp`, so it fails.
+> Install `aiohttp` into the venv and run three-vrm with the venv python:
+>
+> ```bash
+> VIRTUAL_ENV=~/whisperx/whisperX-rocm/.venv uv pip install aiohttp
+> # either change the three-vrm launch in start_all.sh to "$VENV/bin/python server.py",
+> # or install aiohttp into system python3
+> ```
 
 ---
 

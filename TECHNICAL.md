@@ -184,8 +184,23 @@ into a natural standing position and bends the elbows by about 14° (`zundamon.h
 
 ## Known limitations
 
-- **WhisperX hits a GPU memory fault past 60 seconds** (a known issue with ROCm 7.x +
-  PyTorch nightly). `vtt` works around it by force-cutting at 55 seconds via VAD. Avoid
+- **PyTorch (ROCm) requires the gfx1151-specific wheels.** Use `torch==2.8.0+rocm7.12.0` /
+  `torchaudio==2.8.0a0+rocm7.12.0` from `repo.amd.com/rocm/whl/gfx1151/`. The generic
+  `whl-multi-arch` build fails at runtime with `hipErrorInvalidImage`
+  (`kpack_load_code_object failed with error: 13`) on **every GPU op**. torch bundles its own
+  `rocm-sdk-libraries-gfx1151` (7.12), separate from the system ROCm 7.14, but it coexists in
+  one process with CTranslate2 (which uses the system ROCm 7.14) as long as `LD_LIBRARY_PATH`
+  includes `/opt/rocm/lib`.
+- **torch must be imported before ctranslate2/whisperx.** `whisperx.load_model` imports
+  ctranslate2 first (via `whisperx.asr`), and ctranslate2 imports torch during its own init.
+  In that order ctranslate2 loads the system ROCm first, and torch's bundled `libhipblaslt.so.1`
+  cannot resolve rocRoller symbols (`OSError: undefined symbol: _ZN9rocRoller...`). As a fix,
+  `ttllm/server.py` does `import torch` at the very top.
+- **Pin torchaudio to < 2.9.** pyannote-audio uses `torchaudio.info` / `AudioMetaData`, both
+  removed in torchaudio 2.9, so 2.9+ fails at import with `AttributeError`.
+- **Run three-vrm with the venv python.** system python (3.14) has no `aiohttp`.
+- **WhisperX hits a GPU memory fault past 60 seconds** (a known issue with ROCm + PyTorch).
+  `vtt` works around it by force-cutting at 55 seconds via VAD. Avoid
   long recordings on the browser side as well.
 - **Silent utterances previously caused a 500 error**. The WhisperX `IndexError` thrown
   when Silero VAD returns "No active speech" is now caught inside `_transcribe_path` and
@@ -201,7 +216,13 @@ into a natural standing position and bends the elbows by about 14° (`zundamon.h
 Every hard-coded path in shell scripts and Python has been replaced with `$USER` /
 `os.path.expanduser("~/...")` — there's no remaining `/home/<someone>` hardcoding. It
 works for other users too, as long as the directory layout
-(`~/AIassistant/`, `~/llama.cpp/`, `~/AIzunda/whisperX-rocm/.venv/`) is in place.
+(`~/AIassistant/`, `~/llama.cpp/`, `~/whisperx/whisperX-rocm/.venv/`) is in place.
+
+> :pencil: The WhisperX venv defaults to `~/whisperx/whisperX-rocm/.venv`
+> (`ttllm/run.sh` / `install.sh`; override with `WHISPERX_VENV`). The `whisperX-rocm` symlink
+> under AIassistant points there too. It previously used `~/AIzunda/whisperX-rocm`, but after
+> upgrading to Ubuntu 26.04 (system python 3.14) the old venv's interpreter broke, so it was
+> consolidated onto `~/whisperx`.
 
 ## Troubleshooting
 
@@ -209,6 +230,11 @@ works for other users too, as long as the directory layout
 |---|---|
 | Nothing happens when pressing 🎤 | Click the screen to enable AudioContext. Also check the browser's mic permission |
 | Koteko doesn't speak / 500 error | Check ttllm logs via `tmux attach -t aiassistant`. Also test llama reachability with `curl :8001/health` |
+| STT fails with `undefined symbol: _ZN9rocRoller...` | torch is imported after ctranslate2. Confirm the `import torch` at the top of `ttllm/server.py` |
+| torch fails with `hipErrorInvalidImage` / `kpack_load_code_object failed` | The generic multi-arch torch is installed. Replace it with the gfx1151-specific wheels (README step 3) |
+| `module 'torchaudio' has no attribute 'AudioMetaData'` | torchaudio is 2.9+. Downgrade to 2.8.x (`2.8.0a0+rocm7.12.0`) |
+| three-vrm fails with `ModuleNotFoundError: aiohttp` | Run it with the venv python (`$VENV/bin/python server.py`), or install aiohttp into system python |
+| CTranslate2 cmake fails on `cmake_minimum_required` | CMake 4.x. Add `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` |
 | First utterance is slow | Preload WhisperX with `curl -X POST :8001/warmup` |
 | Arms point the wrong way (after swapping VRM) | Flip the sign of `rotation.z` in `zundamon.html:applyRestPose` |
 | Background doesn't change | Check the `/images_list` response in DevTools console. Reload the browser after adding images |

@@ -11,7 +11,7 @@ export LD_LIBRARY_PATH="/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:${LD
 # 文境界 [。！？\n] が早く出るほど three-vrm が早く VOICEVOX へ渡せる。
 # export SYSTEM_PROMPT="${SYSTEM_PROMPT:-あなたはオリジナルキャラです。名前はコテコ。一人称は「コテコ」、元気いっぱいの明るい女の子として、「〜だよ！」「〜だね！」のような弾んだ口調で、親しみやすく簡潔に話してください。返答は必ず短い一文から始めること。最初の一文は15文字以内の相づち・結論・呼びかけにして、すぐ「。」で言い切る。詳しい説明はそのあとの文に分けて続ける。}"
 
-VENV="${WHISPERX_VENV:-/home/$USER/AIzunda/whisperX-rocm/.venv}"
+VENV="${WHISPERX_VENV:-/home/$USER/whisperx/whisperX-rocm/.venv}"
 HOST="${BRIDGE_HOST:-0.0.0.0}"
 PORT="${BRIDGE_PORT:-8001}"
 

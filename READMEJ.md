@@ -40,7 +40,7 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 | `vtt/` | CLI PTT マイク (任意) | — |
 | `images/` | VRM ビューア背景 (5 分ごとにローテーション) | — |
 | `vroid/koteko.vrm` | コテコ VRM 1.0 モデル | — |
-| `whisperX-rocm/` | WhisperX の ROCm フォーク (`~/AIzunda/whisperX-rocm` へのシンボリックリンク) | — |
+| `whisperX-rocm/` | WhisperX の ROCm フォーク (`~/whisperx/whisperX-rocm` へのシンボリックリンク) | — |
 
 > :pencil: 現在の既定 LLM は **Qwen3.6-35B-A3B (MoE)** です。以前は dense な
 > Qwen3.6-27B + MTP 投機デコードを使っていましたが、帯域が細い iGPU では MoE の方が
@@ -48,10 +48,12 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 
 ### 前提
 
-- **OS** : Ubuntu 24.04.4 LTS
+- **OS** : Ubuntu 26.04 (resolute)
 - **GPU** : AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1151、48GB VRAM)
-- **ROCm** : 7.2.1 (`/opt/rocm`)
-- **Python** : 3.12.3
+- **ROCm** : 7.14.0 (`/opt/rocm`)。Ubuntu 26.04 では apt でネイティブ導入できます
+  (`amdrocm-core-sdk7.14-gfx1151` を `repo.amd.com/rocm/packages-multi-arch/ubuntu2604` から)。
+  カーネル同梱 amdgpu が gfx1151 対応済みなので DKMS / `amdgpu-install` は不要。
+- **Python** : system 3.14 / 各 venv は 3.12 (`.python-version` で固定)
 - **Docker** : 29.x (VOICEVOX 用)
 - **ブラウザ** : Google Chrome (`AudioContext` を使うため Firefox でも可)
 - **tmux / curl / uv / huggingface_hub (hf CLI)** : 起動スクリプトで使用
@@ -80,7 +82,11 @@ git clone https://github.com/<your_whisperx_rocm_fork>/whisperX-rocm.git
 git clone https://github.com/<your_ctranslate2_rocm_fork>/ctranslate2-rocm.git
 ```
 
-> :pencil: 実機では `whisperX-rocm` を `~/AIzunda/whisperX-rocm` に置いていますが、新規構築する場合は `~/whisperx/whisperX-rocm` でも構いません。AIassistant 側の `whisperX-rocm` は **シンボリックリンク** なので、リンク先は環境に合わせて貼り直してください。
+> :pencil: `whisperX-rocm` は `~/whisperx/whisperX-rocm` に置きます (AIassistant 側の
+> `whisperX-rocm` はそこへのシンボリックリンク)。ttllm の `run.sh` / `install.sh` もこのパスを
+> 既定にしています。以前は `~/AIzunda/whisperX-rocm` に置いていましたが、OS 更新 (Ubuntu
+> 26.04 / system python 3.14) で旧 venv が壊れたため `~/whisperx` 側に統一しました。
+> リンク先を変える場合は `ln -sfn <path> whisperX-rocm` と `WHISPERX_VENV` を合わせてください。
 
 こちらも参照してください
 
@@ -101,15 +107,18 @@ export AMDGPU_TARGETS=gfx1151
 
 cmake .. -DWITH_HIP=ON -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
   -DCMAKE_HIP_ARCHITECTURES=gfx1151 -DCMAKE_BUILD_TYPE=Release \
-  -DOPENMP_RUNTIME=COMP \
+  -DOPENMP_RUNTIME=COMP -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_C_COMPILER=/opt/rocm/lib/llvm/bin/clang \
   -DCMAKE_PREFIX_PATH=/opt/rocm -DBUILD_CLI=OFF
-make -j$(nproc) && sudo make install
+make -j$(nproc) && sudo make install && sudo ldconfig
 ```
 
 `/usr/local/lib/libctranslate2.so` が入れば成功です。
+
+> :warning: CMake 4.x では同梱 `third_party/cpu_features` の `cmake_minimum_required`
+> が古すぎて configure が失敗します。上記の `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` が必須です。
 
 ---
 
@@ -117,13 +126,28 @@ make -j$(nproc) && sudo make install
 
 ```bash
 cd ~/whisperx/whisperX-rocm
-uv venv && uv pip install -e .
+uv venv && uv pip install -e .   # venv は .python-version により 3.12
+
+# uv pip install -e . は既定で NVIDIA CUDA 版 torch を入れてしまうので、
+# gfx1151 専用の ROCm ホイールに差し替える (下の「PyTorch (ROCm)」参照)
+uv pip uninstall torch torchaudio
+uv pip install \
+  --index-url https://repo.amd.com/rocm/whl/gfx1151/ \
+  --extra-index-url https://pypi.org/simple \
+  --index-strategy unsafe-best-match --prerelease allow \
+  torch==2.8.0+rocm7.12.0 torchaudio==2.8.0a0+rocm7.12.0
 
 # ROCm 版 ctranslate2 の Python バインディングを再インストール
 rm -rf .venv/lib/python3.12/site-packages/ctranslate2*
 export CTRANSLATE2_ROOT=/usr/local
-uv pip install --reinstall pybind11 ~/whisperx/ctranslate2-rocm/python
+uv pip install --reinstall --no-deps pybind11 ~/whisperx/ctranslate2-rocm/python
 ```
+
+> :warning: **PyTorch (ROCm) は gfx1151 専用インデックスを使うこと。**
+> 汎用の `whl-multi-arch` 版は実行時に `hipErrorInvalidImage`
+> (`kpack_load_code_object failed`) で全 GPU 操作が落ちます。また **torchaudio は 2.9 未満**
+> に固定します (pyannote が `torchaudio.info` / `AudioMetaData` を使うが 2.9 で削除された)。
+> これらのホイールは cp310 が無いため venv は Python 3.11+ が必須です。
 
 確認:
 
@@ -217,7 +241,18 @@ cd ~/AIassistant/ttllm
 ./install.sh
 ```
 
-`fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` が **WhisperX-ROCm の venv に追加** されます (専用 venv は作らず共有)。
+`fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` が **WhisperX-ROCm の venv に追加** されます (専用 venv は作らず共有)。`install.sh` / `run.sh` は既定で
+`~/whisperx/whisperX-rocm/.venv` を使います (別の場所なら `WHISPERX_VENV` で上書き)。
+
+> :warning: **three-vrm も同じ venv の python で起動してください。** `start_all.sh` は
+> `python3 server.py` (system python) で起動しますが、system python には `aiohttp` が無いため
+> 失敗します。venv に `aiohttp` を入れておき、three-vrm を venv python で走らせるのが確実です:
+>
+> ```bash
+> VIRTUAL_ENV=~/whisperx/whisperX-rocm/.venv uv pip install aiohttp
+> # start_all.sh の three-vrm 起動を「$VENV/bin/python server.py」に変更するか、
+> # system python3 に aiohttp を入れる
+> ```
 
 ---
 

@@ -179,7 +179,21 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 
 ## 既知の制約
 
-- **WhisperX は 60 秒超で GPU memory fault** (ROCm 7.x + PyTorch nightly の既知問題)。
+- **PyTorch (ROCm) は gfx1151 専用ホイールが必須**。`repo.amd.com/rocm/whl/gfx1151/` の
+  `torch==2.8.0+rocm7.12.0` / `torchaudio==2.8.0a0+rocm7.12.0` を使う。汎用の
+  `whl-multi-arch` 版は実行時に `hipErrorInvalidImage` (`kpack_load_code_object failed with
+  error: 13`) で **全 GPU 操作が落ちる**。torch はシステム ROCm 7.14 とは別に自前の
+  `rocm-sdk-libraries-gfx1151` (7.12) を同梱するが、CTranslate2 (システム ROCm 7.14) と
+  同一プロセスで共存できる (`LD_LIBRARY_PATH` に `/opt/rocm/lib` が必要)。
+- **torch は ctranslate2/whisperx より先に import** する必要がある。`whisperx.load_model`
+  は `whisperx.asr` 経由で ctranslate2 を先に読み、その中で torch が読まれる。この順序だと
+  ctranslate2 がシステム ROCm を先に載せ、torch 同梱の `libhipblaslt.so.1` が rocRoller
+  シンボルを解決できず `OSError: undefined symbol: _ZN9rocRoller...` で落ちる。対策として
+  `ttllm/server.py` の先頭で `import torch` している。
+- **torchaudio は 2.9 未満に固定**。pyannote-audio が `torchaudio.info` / `AudioMetaData`
+  を使うが torchaudio 2.9 で削除されたため、2.9 以上だと `AttributeError` で import が落ちる。
+- **three-vrm は venv python で起動**する。system python (3.14) には `aiohttp` が無い。
+- **WhisperX は 60 秒超で GPU memory fault** (ROCm + PyTorch の既知問題)。
   vtt は VAD で 55 秒に強制カットして回避しています。ブラウザ側の録音も長尺は避けてください。
 - **無音発話で以前 500 エラー** が出ていましたが、Silero VAD が "No active speech" を
   返したときの WhisperX IndexError を `_transcribe_path` で捕捉して空文字に落とすように
@@ -194,8 +208,14 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 
 全 shell script / Python のハードコードパスは `$USER` / `os.path.expanduser("~/...")`
 に置換済で、`/home/<someone>` の決め打ちは残っていません。他ユーザーで動かす場合でも、
-`~/AIassistant/`, `~/llama.cpp/`, `~/AIzunda/whisperX-rocm/.venv/` のディレクトリ構造さえ揃えれば
+`~/AIassistant/`, `~/llama.cpp/`, `~/whisperx/whisperX-rocm/.venv/` のディレクトリ構造さえ揃えれば
 動きます。
+
+> :pencil: WhisperX venv の既定パスは `~/whisperx/whisperX-rocm/.venv` です
+> (`ttllm/run.sh` / `install.sh`、`WHISPERX_VENV` で上書き可)。AIassistant 直下の
+> `whisperX-rocm` シンボリックリンクもこのパスを指します。以前は `~/AIzunda/whisperX-rocm`
+> を使っていましたが、OS を Ubuntu 26.04 (system python 3.14) に更新した際に旧 venv の
+> インタプリタ参照が切れたため、動作確認済みの `~/whisperx` 側に統一しました。
 
 ## トラブルシュート
 
@@ -203,6 +223,11 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 |---|---|
 | 🎤 を押しても無音 | 画面をクリックして AudioContext を有効化。ブラウザの mic 権限も確認 |
 | コテコが喋らない / 500 エラー | `tmux attach -t aiassistant` で ttllm のログ確認。`curl :8001/health` で llama 到達性もチェック |
+| STT で `undefined symbol: _ZN9rocRoller...` | torch が ctranslate2 より後に import されている。`ttllm/server.py` 冒頭の `import torch` を確認 |
+| torch で `hipErrorInvalidImage` / `kpack_load_code_object failed` | 汎用 multi-arch の torch が入っている。gfx1151 専用インデックス版に入れ替える (READMEJ 手順3) |
+| `module 'torchaudio' has no attribute 'AudioMetaData'` | torchaudio が 2.9 以上。2.8.x (`2.8.0a0+rocm7.12.0`) に下げる |
+| three-vrm が `ModuleNotFoundError: aiohttp` | venv python で起動する (`$VENV/bin/python server.py`)。または system python に aiohttp を入れる |
+| CTranslate2 の cmake が `cmake_minimum_required` で失敗 | CMake 4.x。`-DCMAKE_POLICY_VERSION_MINIMUM=3.5` を付ける |
 | 初回発話が遅い | `curl -X POST :8001/warmup` で WhisperX 先読み |
 | 腕の向きがおかしい (VRM 差し替え時) | `zundamon.html:applyRestPose` の `rotation.z` 符号を反転 |
 | 背景が切り替わらない | DevTools console で `/images_list` のレスポンスを確認。画像を置いたらブラウザリロード |

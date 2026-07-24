@@ -6,6 +6,12 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+# torch must be imported before ctranslate2/whisperx so its bundled ROCm
+# (rocm-sdk-libraries-gfx1151) loads first. Otherwise ctranslate2 preloads the
+# system ROCm libs and torch's bundled libhipblaslt fails to resolve rocRoller
+# symbols (OSError: undefined symbol _ZN9rocRoller...).
+import torch  # noqa: F401
+
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
