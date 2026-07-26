@@ -106,7 +106,6 @@ Build the CTranslate2 backend that `faster-whisper` calls, with ROCm/HIP support
 cd ~/whisperx/ctranslate2-rocm
 mkdir -p build && cd build
 
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export AMDGPU_TARGETS=gfx1151
 
 cmake .. -DWITH_HIP=ON -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
@@ -154,6 +153,11 @@ uv pip install --reinstall --no-deps pybind11 ~/whisperx/ctranslate2-rocm/python
 > (pyannote uses `torchaudio.info` / `AudioMetaData`, removed in 2.9). These wheels have no
 > cp310, so the venv must be Python 3.11+.
 
+> :warning: **Do not set `HSA_OVERRIDE_GFX_VERSION`.** Everything here (the gfx1151
+> PyTorch wheels, CTranslate2-ROCm, llama.cpp) is built natively for gfx1151, so
+> overriding the arch breaks it. `start_all.sh` and `ttllm/run.sh` explicitly `unset`
+> it in case it is exported from your shell profile.
+
 Verify:
 
 ```bash
@@ -174,7 +178,6 @@ cd ~/llama.cpp
 git pull --ff-only origin master
 
 mkdir -p build && cd build
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export AMDGPU_TARGETS=gfx1151
 
 cmake .. -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1151 \

@@ -102,7 +102,6 @@ https://qiita.com/kotetsu_yama/items/449e0d0527ab3a233fb8
 cd ~/whisperx/ctranslate2-rocm
 mkdir -p build && cd build
 
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export AMDGPU_TARGETS=gfx1151
 
 cmake .. -DWITH_HIP=ON -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
@@ -149,6 +148,11 @@ uv pip install --reinstall --no-deps pybind11 ~/whisperx/ctranslate2-rocm/python
 > に固定します (pyannote が `torchaudio.info` / `AudioMetaData` を使うが 2.9 で削除された)。
 > これらのホイールは cp310 が無いため venv は Python 3.11+ が必須です。
 
+> :warning: **`HSA_OVERRIDE_GFX_VERSION` は設定しないこと。**
+> gfx1151 版 PyTorch ホイール・CTranslate2-ROCm・llama.cpp のいずれも gfx1151
+> ネイティブビルドなので、arch を override すると壊れます。シェルの profile などから
+> export されている場合に備えて `start_all.sh` と `ttllm/run.sh` で明示的に `unset` しています。
+
 確認:
 
 ```bash
@@ -169,7 +173,6 @@ cd ~/llama.cpp
 git pull --ff-only origin master
 
 mkdir -p build && cd build
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export AMDGPU_TARGETS=gfx1151
 
 cmake .. -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1151 \

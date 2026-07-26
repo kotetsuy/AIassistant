@@ -95,11 +95,13 @@ individual README (`whisperX-rocm` / `ttllm` / `voicevox` / `three-vrm`).
 
 ROCm env vars are set inside each `run.sh`. For manual launches:
 ```bash
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export ROCM_PATH=/opt/rocm
 export HIP_VISIBLE_DEVICES=0
 export LD_LIBRARY_PATH=/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:$LD_LIBRARY_PATH
 ```
+
+> **Do not set `HSA_OVERRIDE_GFX_VERSION`.** Everything is built natively for
+> gfx1151, so overriding the arch breaks it. `run.sh` explicitly `unset`s it.
 
 ---
 

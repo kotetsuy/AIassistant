@@ -96,11 +96,13 @@ HTTP サービスとして独立しており、必要な部分だけ差し替え
 
 ROCm 環境変数は各 `run.sh` 内で設定済み。手動起動時も必要:
 ```bash
-export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export ROCM_PATH=/opt/rocm
 export HIP_VISIBLE_DEVICES=0
 export LD_LIBRARY_PATH=/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:$LD_LIBRARY_PATH
 ```
+
+> **`HSA_OVERRIDE_GFX_VERSION` は設定しないこと。** すべて gfx1151 ネイティブ
+> ビルドなので、arch を override すると壊れます。`run.sh` で明示的に `unset` しています。
 
 ---
 

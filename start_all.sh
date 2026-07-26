@@ -39,7 +39,10 @@ VTT_DIR="/home/$USER/AIassistant/vtt"
 BROWSER_URL="http://localhost:8000/zundamon.html"
 
 # gfx1151 (Ryzen AI Max+ 395) 向け ROCm env。
-export HSA_OVERRIDE_GFX_VERSION="${HSA_OVERRIDE_GFX_VERSION:-11.5.1}"
+# HSA_OVERRIDE_GFX_VERSION は設定しない。
+# repo.amd.com の gfx1151 wheel も llama.cpp も gfx1151 ネイティブビルドなので
+# override すると壊れる。
+unset HSA_OVERRIDE_GFX_VERSION
 export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
 export AMDGPU_TARGETS="${AMDGPU_TARGETS:-gfx1151}"
@@ -121,8 +124,7 @@ wait_http "VOICEVOX" "http://localhost:50021/version" 60
 
 # ---- 2. llama-server ----------------------------------------------------
 
-LLAMA_CMD="HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION} \
-ROCM_PATH=${ROCM_PATH} \
+LLAMA_CMD="ROCM_PATH=${ROCM_PATH} \
 HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES} \
 LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
 ${LLAMA_BIN} -m ${QWEN_MODEL} --host ${LLAMA_HOST} --port ${LLAMA_PORT} -ngl ${LLAMA_NGL} -c ${LLAMA_CTX} -fit off"

@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # ROCm env for whisperX on AMD Ryzen AI Max+ 395 (gfx1151).
-export HSA_OVERRIDE_GFX_VERSION="${HSA_OVERRIDE_GFX_VERSION:-11.5.1}"
+# HSA_OVERRIDE_GFX_VERSION は設定しない (gfx1151 ネイティブビルドなので壊れる)。
+unset HSA_OVERRIDE_GFX_VERSION
 export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
 export LD_LIBRARY_PATH="/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
