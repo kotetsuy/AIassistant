@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# モデルはこのマシンに事前キャッシュ済み。既定でオフラインにして、
+# load_model() 起動時に HuggingFace へリビジョン確認へ行って
+# ネットワークが詰まると warmup ごとハングするのを防ぐ。
+# 新しいモデルを取りに行きたいときは HF_HUB_OFFLINE=0 で起動する。
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
+# 万一オンラインで起動した場合でも、メタデータ確認で無限に待たない。
+export HF_HUB_ETAG_TIMEOUT="${HF_HUB_ETAG_TIMEOUT:-10}"
+
 # ROCm env for whisperX on AMD Ryzen AI Max+ 395 (gfx1151).
 # HSA_OVERRIDE_GFX_VERSION は設定しない (gfx1151 ネイティブビルドなので壊れる)。
 unset HSA_OVERRIDE_GFX_VERSION

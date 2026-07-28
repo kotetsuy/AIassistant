@@ -14,6 +14,7 @@ import torch  # noqa: F401
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -194,7 +195,10 @@ async def health():
 
 @app.post("/warmup")
 async def warmup():
-    get_model()
+    # load_model() は同期ブロッキングなので、スレッドプールに逃がして
+    # イベントループ (単一ワーカー) を止めない。これを直に await 無しで
+    # 呼ぶと warmup 中は /health すら応答できなくなる。
+    await run_in_threadpool(get_model)
     return {"loaded": True}
 
 
@@ -202,7 +206,7 @@ async def warmup():
 async def transcribe(audio: UploadFile = File(...)):
     path = await _save_upload(audio)
     try:
-        text = _transcribe_path(path)
+        text = await run_in_threadpool(_transcribe_path, path)
     finally:
         try:
             os.unlink(path)
@@ -230,7 +234,7 @@ async def voice_chat(
 ):
     path = await _save_upload(audio)
     try:
-        transcript = _transcribe_path(path)
+        transcript = await run_in_threadpool(_transcribe_path, path)
     finally:
         try:
             os.unlink(path)
@@ -270,7 +274,7 @@ async def voice_chat_stream(
     """STT → LLM をストリームし、SSE で {transcript, token..., done} を返す。"""
     path = await _save_upload(audio)
     try:
-        transcript = _transcribe_path(path)
+        transcript = await run_in_threadpool(_transcribe_path, path)
     finally:
         try:
             os.unlink(path)
