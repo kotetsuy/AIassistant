@@ -36,29 +36,73 @@ fi
 # ---- 2. 取りこぼしプロセスを止める -----------------------------------
 # tmux のウィンドウを kill-session で閉じるとその中のプロセスも
 # 親が消えて SIGHUP で落ちるが、SIGHUP を握り潰すものもあるので保険。
+#
+# start_all.sh は各サービスを cd してから相対パスで起動するので、cmdline に
+# ディレクトリ名が出てこない (実際は "python -m uvicorn server:app ..." や
+# "python server.py")。パス込みのパターンで pgrep しても永久に空振りするため、
+# LISTEN ポートから pid を引き、cmdline で本人確認してから kill する。
+# vtt はポートを持たないので cmdline パターンで拾う。
 
-PATTERNS=(
-    "llama.cpp/build/bin/llama-server"
-    "AIassistant/ttllm/server:app"
-    "AIassistant/three-vrm/server.py"
-    "AIassistant/vtt/vtt.py"
+command -v ss >/dev/null || warn "ss が無いのでポートからの探索はスキップします"
+
+# listening_pids <port> — 指定ポートで LISTEN している pid を列挙
+listening_pids() {
+    command -v ss >/dev/null || return 0
+    ss -tlnpH "sport = :$1" 2>/dev/null |
+        sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u
+}
+
+# stop_pids <label> <pid...> — SIGTERM して、落ちなければ SIGKILL
+stop_pids() {
+    local label="$1"; shift
+    local pids=("$@") alive=() p
+    (( ${#pids[@]} )) || return 0
+
+    log "残存プロセスを停止: ${label} (pid=$(IFS=,; echo "${pids[*]}"))"
+    kill "${pids[@]}" 2>/dev/null || true
+
+    for _ in 1 2 3 4 5 6; do
+        sleep 0.5
+        alive=()
+        for p in "${pids[@]}"; do
+            kill -0 "$p" 2>/dev/null && alive+=("$p")
+        done
+        (( ${#alive[@]} )) || return 0
+        pids=("${alive[@]}")
+    done
+
+    warn "  SIGTERM で落ちないので SIGKILL します (pid=$(IFS=,; echo "${pids[*]}"))"
+    kill -9 "${pids[@]}" 2>/dev/null || true
+}
+
+# "<port>|<ラベル>|<cmdline に期待する正規表現>"
+PORT_TARGETS=(
+    "8080|llama-server|llama-server"
+    "8001|ttllm|uvicorn"
+    "8000|three-vrm|server\.py"
 )
 
-for pat in "${PATTERNS[@]}"; do
-    pids=$(pgrep -f "$pat" || true)
-    if [[ -n "${pids}" ]]; then
-        log "残存プロセスを停止: $pat (pid=${pids//$'\n'/,})"
-        # shellcheck disable=SC2086
-        kill ${pids} 2>/dev/null || true
-        sleep 1
-        # まだ生きていれば SIGKILL
-        pids=$(pgrep -f "$pat" || true)
-        if [[ -n "${pids}" ]]; then
-            # shellcheck disable=SC2086
-            kill -9 ${pids} 2>/dev/null || true
+for target in "${PORT_TARGETS[@]}"; do
+    IFS='|' read -r port label cmd_re <<<"$target"
+    targets=()
+    for pid in $(listening_pids "$port"); do
+        [[ -r "/proc/$pid/cmdline" ]] || continue
+        # 自分のプロセスで、かつ期待する cmdline のものだけ止める。
+        # 無関係なプロセスがポートを使っていても巻き込まない。
+        [[ "$(stat -c %U "/proc/$pid" 2>/dev/null)" == "$USER" ]] || continue
+        cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline")
+        if [[ "$cmd" =~ $cmd_re ]]; then
+            targets+=("$pid")
+        else
+            warn ":${port} は想定外のプロセスが使用中なので触りません (pid=${pid}: ${cmd% })"
         fi
-    fi
+    done
+    stop_pids "${label} (:${port})" ${targets[@]+"${targets[@]}"}
 done
+
+# vtt はポートを持たないので cmdline で拾う (自分のプロセスのみ)。
+mapfile -t vtt_pids < <(pgrep -u "$USER" -f 'python[0-9.]* vtt\.py' || true)
+stop_pids "vtt" ${vtt_pids[@]+"${vtt_pids[@]}"}
 
 # ---- 3. VOICEVOX docker --------------------------------------------
 
