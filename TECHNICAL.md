@@ -233,7 +233,7 @@ works for other users too, as long as the directory layout
 | STT fails with `undefined symbol: _ZN9rocRoller...` | torch is imported after ctranslate2. Confirm the `import torch` at the top of `ttllm/server.py` |
 | torch fails with `hipErrorInvalidImage` / `kpack_load_code_object failed` | The generic multi-arch torch is installed. Replace it with the gfx1151-specific wheels (README step 3) |
 | `module 'torchaudio' has no attribute 'AudioMetaData'` | torchaudio is 2.9+. Downgrade to 2.8.x (`2.8.0a0+rocm7.12.0`) |
-| three-vrm fails with `ModuleNotFoundError: aiohttp` | Run it with the venv python (`$VENV/bin/python server.py`), or install aiohttp into system python |
+| three-vrm fails with `ModuleNotFoundError: aiohttp` | Run it with the venv python (`start_all.sh` already does). By hand: `$WHISPERX_VENV/bin/python server.py`. If the venv lacks aiohttp: `VIRTUAL_ENV=$WHISPERX_VENV uv pip install aiohttp` |
 | CTranslate2 cmake fails on `cmake_minimum_required` | CMake 4.x. Add `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` |
 | First utterance is slow | Preload WhisperX with `curl -X POST :8001/warmup` |
 | Arms point the wrong way (after swapping VRM) | Flip the sign of `rotation.z` in `zundamon.html:applyRestPose` |

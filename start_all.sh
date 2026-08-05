@@ -36,6 +36,10 @@ TTLLM_DIR="/home/$USER/AIassistant/ttllm"
 THREE_VRM_DIR="/home/$USER/AIassistant/three-vrm"
 VTT_DIR="/home/$USER/AIassistant/vtt"
 
+# three-vrm は aiohttp を使うが system python (Ubuntu 26.04 は 3.14) には入っていない。
+# ttllm と同じ whisperX venv の python で起動する。
+WHISPERX_VENV="${WHISPERX_VENV:-/home/$USER/whisperx/whisperX-rocm/.venv}"
+
 BROWSER_URL="http://localhost:8000/zundamon.html"
 
 # gfx1151 (Ryzen AI Max+ 395) 向け ROCm env。
@@ -91,6 +95,7 @@ command -v google-chrome >/dev/null || warn "google-chrome が見つかりませ
 [[ -f "$QWEN_MODEL"          ]] || die "Qwen モデルが見つかりません: $QWEN_MODEL"
 [[ -x "$TTLLM_DIR/run.sh"    ]] || die "ttllm/run.sh がありません"
 [[ -d "$THREE_VRM_DIR"       ]] || die "three-vrm ディレクトリがありません"
+[[ -x "$WHISPERX_VENV/bin/python" ]] || die "whisperX venv がありません: $WHISPERX_VENV"
 [[ -x "$VTT_DIR/run.sh"      ]] || die "vtt/run.sh がありません"
 
 # 既存セッションは作り直す。
@@ -151,7 +156,7 @@ fi
 
 # ---- 5. three-vrm -------------------------------------------------------
 
-new_window "three-vrm" "cd ${THREE_VRM_DIR} && python3 server.py"
+new_window "three-vrm" "cd ${THREE_VRM_DIR} && ${WHISPERX_VENV}/bin/python server.py"
 
 wait_http "three-vrm" "http://localhost:8000/status" 30
 

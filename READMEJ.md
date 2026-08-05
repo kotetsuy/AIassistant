@@ -247,15 +247,15 @@ cd ~/AIassistant/ttllm
 `fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` が **WhisperX-ROCm の venv に追加** されます (専用 venv は作らず共有)。`install.sh` / `run.sh` は既定で
 `~/whisperx/whisperX-rocm/.venv` を使います (別の場所なら `WHISPERX_VENV` で上書き)。
 
-> :warning: **three-vrm も同じ venv の python で起動してください。** `start_all.sh` は
-> `python3 server.py` (system python) で起動しますが、system python には `aiohttp` が無いため
-> 失敗します。venv に `aiohttp` を入れておき、three-vrm を venv python で走らせるのが確実です:
+> :pencil: **three-vrm も同じ venv の python で起動します。** system python (Ubuntu 26.04 は
+> 3.14) には `aiohttp` が無いため、`start_all.sh` は `$WHISPERX_VENV/bin/python server.py`
+> で three-vrm を起動します。venv 側に `aiohttp` が入っていることだけ確認してください:
 >
 > ```bash
 > VIRTUAL_ENV=~/whisperx/whisperX-rocm/.venv uv pip install aiohttp
-> # start_all.sh の three-vrm 起動を「$VENV/bin/python server.py」に変更するか、
-> # system python3 に aiohttp を入れる
 > ```
+>
+> 手で起動する場合も `python3 server.py` ではなく venv の python を使ってください。
 
 ---
 

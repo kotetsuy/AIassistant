@@ -226,7 +226,7 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 | STT で `undefined symbol: _ZN9rocRoller...` | torch が ctranslate2 より後に import されている。`ttllm/server.py` 冒頭の `import torch` を確認 |
 | torch で `hipErrorInvalidImage` / `kpack_load_code_object failed` | 汎用 multi-arch の torch が入っている。gfx1151 専用インデックス版に入れ替える (READMEJ 手順3) |
 | `module 'torchaudio' has no attribute 'AudioMetaData'` | torchaudio が 2.9 以上。2.8.x (`2.8.0a0+rocm7.12.0`) に下げる |
-| three-vrm が `ModuleNotFoundError: aiohttp` | venv python で起動する (`$VENV/bin/python server.py`)。または system python に aiohttp を入れる |
+| three-vrm が `ModuleNotFoundError: aiohttp` | venv python で起動する (`start_all.sh` は対応済み)。手動起動なら `$WHISPERX_VENV/bin/python server.py`。venv に aiohttp が無ければ `VIRTUAL_ENV=$WHISPERX_VENV uv pip install aiohttp` |
 | CTranslate2 の cmake が `cmake_minimum_required` で失敗 | CMake 4.x。`-DCMAKE_POLICY_VERSION_MINIMUM=3.5` を付ける |
 | 初回発話が遅い | `curl -X POST :8001/warmup` で WhisperX 先読み |
 | 腕の向きがおかしい (VRM 差し替え時) | `zundamon.html:applyRestPose` の `rotation.z` 符号を反転 |

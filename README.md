@@ -253,15 +253,15 @@ This **adds `fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` to
 WhisperX-ROCm venv** (no dedicated venv is created — the venv is shared). `install.sh` /
 `run.sh` default to `~/whisperx/whisperX-rocm/.venv` (override with `WHISPERX_VENV`).
 
-> :warning: **Run three-vrm with the same venv's python.** `start_all.sh` launches it as
-> `python3 server.py` (system python), but system python has no `aiohttp`, so it fails.
-> Install `aiohttp` into the venv and run three-vrm with the venv python:
+> :pencil: **three-vrm also runs with the same venv's python.** System python (3.14 on Ubuntu
+> 26.04) has no `aiohttp`, so `start_all.sh` launches three-vrm as
+> `$WHISPERX_VENV/bin/python server.py`. Just make sure `aiohttp` is installed in the venv:
 >
 > ```bash
 > VIRTUAL_ENV=~/whisperx/whisperX-rocm/.venv uv pip install aiohttp
-> # either change the three-vrm launch in start_all.sh to "$VENV/bin/python server.py",
-> # or install aiohttp into system python3
 > ```
+>
+> When starting it by hand, use the venv python rather than `python3 server.py`.
 
 ---
 
