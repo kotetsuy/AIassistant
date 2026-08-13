@@ -178,6 +178,19 @@
             const VOICE_CHAT_URL = "/voice_chat_speak_stream";
             const SPEAKER_ID = 3;
 
+            // ストリーミング STT。発話中から認識を進めるので、録音停止後の待ち
+            // 時間がほぼ消える。使えるのは NeMo バックエンドのときだけで、
+            // サーバが非対応を返したら自動で一括経路 (VOICEVOX_CHAT_URL) に戻る。
+            // ?stt=stream / ?stt=batch で明示指定、localStorage でも上書き可。
+            const STT_STREAMING = (() => {
+                const q = new URLSearchParams(location.search).get("stt");
+                if (q === "stream") return true;
+                if (q === "batch") return false;
+                return localStorage.getItem("sttStreaming") === "1";
+            })();
+            const STT_STREAM_URL = `ws://${location.host}/stt_chat_stream?speaker_id=${SPEAKER_ID}`;
+            const STT_SAMPLE_RATE = 16000;
+
             const statusEl = document.getElementById("status");
             const subtitleEl = document.getElementById("subtitle");
             const userSubtitleEl = document.getElementById("user-subtitle");
@@ -579,6 +592,120 @@
             let pressTimer = null;
             let pressedLong = false;
 
+            // ---- Streaming STT (AudioWorklet → WS → /stt_chat_stream) ----
+            // MediaRecorder の start(timeslice) は使えない: webm/opus のチャンクは
+            // 先頭以外が単独でデコードできず、サーバ側で 1 つずつ扱えないため。
+            // 生 PCM を取り出して 16kHz mono へ落としてから送る。
+            let sttSocket = null;
+            let sttNode = null;
+            let sttSource = null;
+            let sttWorkletReady = false;
+
+            const STT_WORKLET_SRC = `
+                class PCMTap extends AudioWorkletProcessor {
+                    process(inputs) {
+                        const ch = inputs[0] && inputs[0][0];
+                        if (ch && ch.length) this.port.postMessage(ch.slice());
+                        return true;
+                    }
+                }
+                registerProcessor("pcm-tap", PCMTap);
+            `;
+
+            async function ensureSttWorklet(ctx) {
+                if (sttWorkletReady) return;
+                const url = URL.createObjectURL(
+                    new Blob([STT_WORKLET_SRC], { type: "application/javascript" }),
+                );
+                try {
+                    await ctx.audioWorklet.addModule(url);
+                    sttWorkletReady = true;
+                } finally {
+                    URL.revokeObjectURL(url);
+                }
+            }
+
+            // AudioContext は 48kHz で動くことが多いので 16kHz へ間引く。
+            function downsampleTo16k(input, inRate) {
+                if (inRate === STT_SAMPLE_RATE) return input;
+                const ratio = inRate / STT_SAMPLE_RATE;
+                const out = new Float32Array(Math.floor(input.length / ratio));
+                for (let i = 0; i < out.length; i++) {
+                    const start = Math.floor(i * ratio);
+                    const end = Math.min(Math.floor((i + 1) * ratio), input.length);
+                    let sum = 0;
+                    for (let j = start; j < end; j++) sum += input[j];
+                    out[i] = end > start ? sum / (end - start) : 0;
+                }
+                return out;
+            }
+
+            async function startStreamingRecording() {
+                const ctx = ensureAudioCtx();
+                await ensureSttWorklet(ctx);
+
+                sttSocket = new WebSocket(STT_STREAM_URL);
+                sttSocket.binaryType = "arraybuffer";
+
+                const opened = await new Promise((resolve) => {
+                    sttSocket.onopen = () => resolve(true);
+                    sttSocket.onerror = () => resolve(false);
+                });
+                if (!opened) {
+                    sttSocket = null;
+                    return false;
+                }
+
+                sttSocket.onmessage = (ev) => {
+                    let msg;
+                    try {
+                        msg = JSON.parse(ev.data);
+                    } catch {
+                        return;
+                    }
+                    if (msg.type === "partial" || msg.type === "final") {
+                        showUserSubtitle(msg.text || "");
+                    } else if (msg.type === "done") {
+                        setMicState("idle", "🎤 を押して話しかけてね");
+                    } else if (msg.type === "error") {
+                        // サーバが非対応 (whisperX 稼働中など) なら一括経路へ。
+                        setMicState("idle", "ストリーミング不可: 通常経路で再試行してね");
+                    }
+                };
+                // 次の発話が「まだストリーミング中」と誤判定しないよう必ず落とす。
+                sttSocket.onclose = () => {
+                    sttSocket = null;
+                    if (recState === "busy") setMicState("idle", "🎤 を押して話しかけてね");
+                };
+
+                sttSource = ctx.createMediaStreamSource(mediaStream);
+                sttNode = new AudioWorkletNode(ctx, "pcm-tap");
+                sttNode.port.onmessage = (ev) => {
+                    if (!sttSocket || sttSocket.readyState !== WebSocket.OPEN) return;
+                    const pcm = downsampleTo16k(ev.data, ctx.sampleRate);
+                    sttSocket.send(pcm.buffer);
+                };
+                // AudioWorklet はデスティネーションに繋がないと駆動されないので、
+                // 無音のゲインを噛ませてスピーカーには出さないまま回す。
+                const mute = ctx.createGain();
+                mute.gain.value = 0;
+                sttSource.connect(sttNode).connect(mute).connect(ctx.destination);
+                return true;
+            }
+
+            function stopStreamingRecording() {
+                try {
+                    if (sttSocket && sttSocket.readyState === WebSocket.OPEN)
+                        sttSocket.send(JSON.stringify({ type: "end" }));
+                } catch {}
+                try {
+                    sttNode?.disconnect();
+                    sttSource?.disconnect();
+                } catch {}
+                sttNode = null;
+                sttSource = null;
+            }
+
             function setMicState(next, hint) {
                 recState = next;
                 micBtn.classList.toggle("recording", next === "recording");
@@ -634,6 +761,21 @@
                     return;
                 }
 
+                if (STT_STREAMING) {
+                    stopAllPlayback();
+                    let ok = false;
+                    try {
+                        ok = await startStreamingRecording();
+                    } catch (e) {
+                        console.warn("streaming STT failed to start:", e);
+                    }
+                    if (ok) {
+                        setMicState("recording", "録音中… 離す/クリックで送信");
+                        return;
+                    }
+                    console.warn("streaming STT unavailable; using the batch path");
+                }
+
                 const mime = pickMimeType();
                 try {
                     mediaRecorder = mime
@@ -660,7 +802,13 @@
             }
 
             function stopRecording() {
-                if (recState !== "recording" || !mediaRecorder) return;
+                if (recState !== "recording") return;
+                if (sttSocket) {
+                    stopStreamingRecording();
+                    setMicState("busy", "送信中…");
+                    return;
+                }
+                if (!mediaRecorder) return;
                 try {
                     mediaRecorder.stop();
                 } catch {}

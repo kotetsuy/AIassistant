@@ -12,11 +12,11 @@ ttllm/
 └── READMEJ.md   # このファイル
 ```
 
-WhisperX-ROCm がインストール済みの venv（`~/AIzunda/whisperX-rocm/.venv`）を共有して動かすので、torch-ROCm / ctranslate2-rocm を二重に入れる必要はありません。`~/AIassistant/whisperX-rocm` はそこへのシンボリックリンクです。
+WhisperX-ROCm がインストール済みの venv（`~/whisperx/whisperX-rocm/.venv`）を共有して動かすので、torch-ROCm / ctranslate2-rocm を二重に入れる必要はありません。`~/AIassistant/whisperX-rocm` はそこへのシンボリックリンクです。
 
 ## 前提
 
-- `~/AIzunda/whisperX-rocm/.venv` に WhisperX-ROCm 一式（whisperx / torch 2.9+rocm / ctranslate2 / faster-whisper / pyannote.audio）が入っていること
+- `~/whisperx/whisperX-rocm/.venv` に WhisperX-ROCm 一式（whisperx / torch 2.9+rocm / ctranslate2 / faster-whisper / pyannote.audio）が入っていること
 - `~/llama.cpp/build/bin/llama-server` がビルド済みであること（MTP 対応のため master 最新を推奨）
 - Qwen3.6 モデル: `~/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf`
 
@@ -107,6 +107,32 @@ curl -X POST http://localhost:8001/warmup
 
 ## 環境変数
 
+### STT バックエンドの選択
+
+| 変数                    | 既定値      | 説明 |
+| ----------------------- | ----------- | ---- |
+| `STT_BACKEND`           | `auto`      | `nemo` / `whisperx` / `auto`。`auto` は NeMo を使い、失敗したら `STT_FALLBACK` へ切り替えて以後そのまま |
+| `STT_FALLBACK`          | `whisperx`  | `auto` 時のフォールバック先。`none` で無効化 |
+| `STT_EAGER_FALLBACK`    | `1`         | warmup でフォールバック先も先読みする。`0` にすると初回フォールバック時にロード待ちが発生する |
+
+フォールバックが発動したときは **WARNING ログ**が出て、`/health` の
+`stt.fallback_active` と `stt.last_error` に反映されます。無言で別モデルに変わることはありません。
+
+```bash
+curl -s localhost:8001/health | jq .stt
+```
+
+### NeMo (既定バックエンド)
+
+| 変数                    | 既定値                                        | 説明 |
+| ----------------------- | --------------------------------------------- | ---- |
+| `NEMO_MODEL`            | `nvidia/nemotron-3.5-asr-streaming-0.6b`      | |
+| `NEMO_LANGUAGE`         | `ja-JP`                                       | **`ja` 単体は不可**。`prompt_dictionary` のキー |
+| `NEMO_DEVICE`           | `cuda`                                        | ROCm も `cuda` と名乗る |
+| `NEMO_ATT_CONTEXT_SIZE` | `[56,13]`                                     | ストリーミングのチャンク長。`[左,右]` は 80ms フレーム単位で、チャンク長 = (右+1)×80ms。`[56,13]`=1120ms / `[56,1]`=160ms |
+
+### whisperX (フォールバック)
+
 | 変数                    | 既定値                         | 説明 |
 | ----------------------- | ------------------------------ | ---- |
 | `WHISPER_MODEL`         | `large-v3-turbo`               | WhisperX モデル名 |
@@ -120,7 +146,7 @@ curl -X POST http://localhost:8001/warmup
 | `SYSTEM_PROMPT`         | コテコ persona (アルヨ調)      | 既定システムプロンプト |
 | `BRIDGE_HOST`           | `0.0.0.0`                      | |
 | `BRIDGE_PORT`           | `8001`                         | |
-| `WHISPERX_VENV`         | `~/AIzunda/whisperX-rocm/.venv` | 共有する venv のパス（whisperx / torch-ROCm / ctranslate2 が入っている側） |
+| `TTLLM_VENV`            | `~/AIassistant/ttllm/.venv`    | 共用 venv のパス（NeMo と whisperX の両方が入っている側） |
 
 ## フロントからの呼び出し
 

@@ -13,7 +13,7 @@
     three-vrm サーバ (port 8000)
          ↓ POST /voice_chat_stream
        ttllm ブリッジ (port 8001)
-         ├─ WhisperX-ROCm (STT, large-v3-turbo)
+         ├─ STT: NeMo Speech (既定) / WhisperX-ROCm (フォールバック)
          └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
          ↓ SSE で token ストリーム
     three-vrm: 文境界で分割 → VOICEVOX (port 50021) → WS 配信
@@ -157,11 +157,13 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 | メソッド | パス | 用途 |
 |---|---|---|
 | GET | `/health` | 自身 + llama-server 到達性 |
-| POST | `/warmup` | WhisperX モデル先読み |
+| POST | `/warmup` | STT モデル先読み + ウォームアップ推論 |
 | POST | `/transcribe` | 音声 → テキスト |
 | POST | `/chat` | テキスト → LLM 応答 (非streaming) |
 | POST | `/voice_chat` | 音声 → 応答 (非streaming) |
-| POST | `/voice_chat_stream` | 音声 → SSE (transcript + token + done) **new** |
+| POST | `/voice_chat_stream` | 音声 → SSE (transcript + token + done) |
+| POST | `/chat_stream` | テキスト → SSE (token + done)。STT を別途済ませた呼び出し元用 **new** |
+| WS | `/transcribe_stream` | 生 PCM (float32 16kHz mono) → partial / final **new** |
 
 ### three-vrm (port 8000)
 
@@ -171,11 +173,97 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 | GET | `/ws` | WebSocket (turn_start / speak / turn_end / transcript / error) |
 | POST | `/speak` | テキスト指定で発話 |
 | POST | `/voice_chat_speak` | 音声 → ワンショット応答 (非streaming) |
-| POST | `/voice_chat_speak_stream` | 音声 → パイプライン応答 **new** |
+| POST | `/voice_chat_speak_stream` | 音声 → パイプライン応答 |
+| GET | `/stt_chat_stream` | WebSocket。発話中の PCM → 部分転写 → LLM → VOICEVOX **new** |
 | GET | `/images_list` | 背景画像一覧 |
 | GET | `/images/{name}` | 背景画像配信 |
 | GET | `/vrm/{name}` | VRM ファイル配信 |
 | GET | `/status` | クライアント数 |
+
+## STT バックエンドの設計
+
+### なぜ 2 系統なのか
+
+移植前は WhisperX-ROCm 一択だった。NeMo Speech に切り替えるにあたり WhisperX を消さず
+**同一プロセス内で実行時フォールバックできる形**にしてある。理由は 2 つ:
+
+1. NeMo は ROCm 公式サポート外の構成で動かしている。壊れたときに会話が止まるのは困る
+2. 長く固有名詞の多い発話では **WhisperX の方が正確**(実測は後述)。用途によって選べる方がいい
+
+### 構成
+
+```
+ttllm/stt/
+  base.py       STTBackend 抽象基底 — transcribe_path(path) -> str が契約の中心
+  audio.py      ffmpeg で webm/ogg/mp4 → 16kHz mono float32 + 末尾 0.5 秒パディング
+  nemo.py       NeMoBackend (既定)
+  whisperx.py   WhisperXBackend (フォールバック)
+  streaming.py  StreamSession — cache-aware ストリーミングのセッション状態
+  __init__.py   STTRouter — バックエンド選択とフォールバック
+```
+
+`server.py` の `_transcribe_path()` は薄いラッパとして残してあるので、
+`/transcribe` `/voice_chat` `/voice_chat_stream` の 3 エンドポイントは無改修。
+
+### 設計上の判断
+
+- **`model.transcribe()` は使わない。** 呼び出しごとに Lhotse dataloader を再構築し、
+  1 リクエストあたり 0.2〜0.4 秒を浪費する。encoder forward と
+  `rnnt_decoder_predictions_tensor()` を直接叩くことで 3.5 秒の発話が 119ms → 88ms になる
+- **音声デコードは自前で持つ。** ブラウザから来るのは webm/opus であって 16kHz WAV ではない。
+  WhisperX は `load_audio()` が内部で ffmpeg を呼んでいたので意識せずに済んでいた
+- **末尾に 0.5 秒の無音を足す。** cache-aware は発話終端の右 context が無いと最後のトークンを
+  出せず、PTT 録音はボタンを離した瞬間に切れる。VOICEVOX 音源では実際に文末の助詞が落ちた
+- **言語プロンプトは `ja-JP`。** `ja` 単体は `prompt_dictionary` に無く拒否される
+- **フォールバックは必ず WARNING と `/health` に出す。** 無言で別モデルに変わるのが最悪
+
+### ストリーミング経路
+
+```
+Browser  getUserMedia → AudioWorklet(生PCM) → 16kHz mono へ間引き
+   │ WebSocket (float32 binary)
+three-vrm  /stt_chat_stream  ── WS 中継 ──▶  ttllm  /transcribe_stream
+   │                                            NeMo cache-aware streaming
+   │                                            att_context_size=[56,13] (1120ms)
+   ◀── partial / final ────────────────────────┘
+   └─ 確定転写で ttllm /chat_stream (SSE) → 文分割 → VOICEVOX → 既存 WS 配信
+```
+
+**MediaRecorder の `start(timeslice)` は使えない。** webm/opus のチャンクは先頭以外が
+単独でデコードできず、サーバ側で 1 つずつ扱えないため。AudioWorklet で生 PCM を取る。
+
+**mel は毎回全体から作り直す。** 100ms ずつ `append_audio` すると、mel プリプロセッサが
+append ごとに独立してパディングするためスライス境界に窓のアーティファクトが入り、
+実際に「川は」が「かは」に化けた。生 PCM を蓄積して毎回全体から mel を計算し直し、
+`buffer_idx` を保ったままバッファを差し替えることで、オフライン経路と同じフレームになる。
+あわせて `online_normalization=True`(オフライン正規化は統計が発話全体に依存するので
+ストリーミングと原理的に両立しない)。
+
+セッション状態(encoder cache・部分仮説)は **StreamSession ごとに独立**で、
+モデル本体の forward だけを `NeMoBackend._lock` で直列化している。
+
+### 実測 (発話終了 → 転写確定、20 回の中央値)
+
+| 音源長 | A: whisperX | B: NeMo 一括 | C: NeMo ストリーミング |
+|---|---|---|---|
+| 1.06s | 254ms | 84ms | **48ms** |
+| 3.50s | 287ms | 119ms | **49ms** |
+| 10.44s | 432ms | 221ms | **53ms** |
+| 12.84s | 545ms | 274ms | **50ms** |
+| 14.22s | 460ms | 255ms | **95ms** |
+
+**ストリーミングの確定時間は音声長にほぼ依存しない**(未処理なのは最後のチャンク分だけ)。
+一括は音声長に比例するので、発話が長いほど差が開く(12.8 秒で whisperX 比 10.8 倍)。
+
+精度(CER、表記ゆれ正規化後)は短文 9 本すべてで 3 構成とも 0.0%。
+**B と C は全音源で完全一致**しており、ストリーミング化による劣化は無い。
+一方 **長文では whisperX が優位**(固有名詞の多い文で 9.9% vs 21.1%)。
+
+エンドツーエンド(発話終了 → 最初の音声)は 717ms → 676ms (3.5秒) / 616ms → 412ms (10.4秒)
+と、STT ほど明確な差にならない。LLM の最初の一文の生成と VOICEVOX 合成が支配的なため。
+**体感は「確実に速くなる」ではなく「遅い側の裾が短くなる」**と理解するのが正確。
+
+詳細は `docs/STT移植_PHASE3.md`、生データは `bench/results.json`。
 
 ## 既知の制約
 
@@ -193,6 +281,12 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 - **torchaudio は 2.9 未満に固定**。pyannote-audio が `torchaudio.info` / `AudioMetaData`
   を使うが torchaudio 2.9 で削除されたため、2.9 以上だと `AttributeError` で import が落ちる。
 - **three-vrm は venv python で起動**する。system python (3.14) には `aiohttp` が無い。
+- **NeMo は cache-aware モデルのため float32 固定**。`compute_dtype != float32` は
+  `NotImplementedError` で明示的に拒否される。WhisperX は float16 で動くので、
+  速度比較はこの条件差込みで見ること。
+- **NeMo はロードだけでは足りずウォームアップ推論が要る**。モデルをロードしただけだと
+  最初のリクエストがカーネルコンパイルで約 2.8 秒かかる。`NeMoBackend.load()` が
+  1 秒の無音で捨て推論を回している。
 - **WhisperX は 60 秒超で GPU memory fault** (ROCm + PyTorch の既知問題)。
   vtt は VAD で 55 秒に強制カットして回避しています。ブラウザ側の録音も長尺は避けてください。
 - **無音発話で以前 500 エラー** が出ていましたが、Silero VAD が "No active speech" を
@@ -208,14 +302,17 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 
 全 shell script / Python のハードコードパスは `$USER` / `os.path.expanduser("~/...")`
 に置換済で、`/home/<someone>` の決め打ちは残っていません。他ユーザーで動かす場合でも、
-`~/AIassistant/`, `~/llama.cpp/`, `~/whisperx/whisperX-rocm/.venv/` のディレクトリ構造さえ揃えれば
-動きます。
+`~/AIassistant/`, `~/llama.cpp/`, `~/Speech/`, `~/whisperx/whisperX-rocm/` のディレクトリ構造さえ
+揃えれば動きます。
 
-> :pencil: WhisperX venv の既定パスは `~/whisperx/whisperX-rocm/.venv` です
-> (`ttllm/run.sh` / `install.sh`、`WHISPERX_VENV` で上書き可)。AIassistant 直下の
-> `whisperX-rocm` シンボリックリンクもこのパスを指します。以前は `~/AIzunda/whisperX-rocm`
-> を使っていましたが、OS を Ubuntu 26.04 (system python 3.14) に更新した際に旧 venv の
-> インタプリタ参照が切れたため、動作確認済みの `~/whisperx` 側に統一しました。
+> :pencil: パイプラインが使う venv は **`~/AIassistant/ttllm/.venv`** です
+> (`ttllm/run.sh` / `install.sh`、`TTLLM_VENV` で上書き可)。NeMo と whisperX の両方が
+> ここに入っており、three-vrm もこの python で起動します。
+> `~/whisperx/whisperX-rocm/.venv` の単体 venv は whisperX を CLI で使うとき用に残してあり、
+> パイプラインからは参照しません。
+>
+> AIassistant 直下の `Speech` / `whisperX-rocm` シンボリックリンク経由でのみ外部リポジトリを
+> 参照します(絶対パスを書かない)。`Speech` は **`rocm-inference` ブランチ**である必要があります。
 
 ## トラブルシュート
 
@@ -226,9 +323,12 @@ VRM のデフォルトは T-pose なので、ロード直後に `applyRestPose()
 | STT で `undefined symbol: _ZN9rocRoller...` | torch が ctranslate2 より後に import されている。`ttllm/server.py` 冒頭の `import torch` を確認 |
 | torch で `hipErrorInvalidImage` / `kpack_load_code_object failed` | 汎用 multi-arch の torch が入っている。gfx1151 専用インデックス版に入れ替える (READMEJ 手順3) |
 | `module 'torchaudio' has no attribute 'AudioMetaData'` | torchaudio が 2.9 以上。2.8.x (`2.8.0a0+rocm7.12.0`) に下げる |
-| three-vrm が `ModuleNotFoundError: aiohttp` | venv python で起動する (`start_all.sh` は対応済み)。手動起動なら `$WHISPERX_VENV/bin/python server.py`。venv に aiohttp が無ければ `VIRTUAL_ENV=$WHISPERX_VENV uv pip install aiohttp` |
+| three-vrm が `ModuleNotFoundError: aiohttp` | venv python で起動する (`start_all.sh` は対応済み)。手動起動なら `$TTLLM_VENV/bin/python server.py`。venv に aiohttp が無ければ `VIRTUAL_ENV=$TTLLM_VENV uv pip install aiohttp` |
 | CTranslate2 の cmake が `cmake_minimum_required` で失敗 | CMake 4.x。`-DCMAKE_POLICY_VERSION_MINIMUM=3.5` を付ける |
-| 初回発話が遅い | `curl -X POST :8001/warmup` で WhisperX 先読み |
+| 初回発話が遅い | `curl -X POST :8001/warmup` で STT 先読み(ロード + ウォームアップ推論で約 33 秒) |
+| STT が急に whisperX になっている | NeMo が落ちてフォールバックした。`curl -s :8001/health \| jq .stt.last_error` で理由を確認 |
+| NeMo が `Cannot reach https://huggingface.co/...: offline mode` で落ちる | `run.sh` が `HF_HUB_OFFLINE=1` で起動するため。`ttllm/install.sh` を実行してモデルをキャッシュする |
+| ストリーミングにしても部分転写が出ない | `/health` の `stt.supports_streaming` を確認。whisperX バックエンドでは非対応で一括経路に倒れる |
 | 腕の向きがおかしい (VRM 差し替え時) | `zundamon.html:applyRestPose` の `rotation.z` 符号を反転 |
 | 背景が切り替わらない | DevTools console で `/images_list` のレスポンスを確認。画像を置いたらブラウザリロード |
 | VRM が読めない | `server.py` の `VRM_DIR` と実ファイルパスを確認。ファイル名は `zundamon.html` の `VRM_URL` に一致させる |

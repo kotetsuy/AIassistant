@@ -103,3 +103,7 @@ build/
 # ================================
 vroid
 
+
+# 評価用音声。肉声の録音と FLEURS データセットの音声を含むため公開しない。
+# bench/bench_stt.py の再現手順は docs/STT移植_PHASE3.md を参照。
+bench/audio/

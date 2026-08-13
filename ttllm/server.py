@@ -13,18 +13,14 @@ from typing import List, Optional
 import torch  # noqa: F401
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+import numpy as np
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
-WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "ja")
-WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
-WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")
-WHISPER_BATCH_SIZE = int(os.getenv("WHISPER_BATCH_SIZE", "8"))
-WHISPER_VAD_METHOD = os.getenv("WHISPER_VAD_METHOD", "silero")
+from stt import STTRouter
 
 # uvicorn 配下なので uvicorn.error ロガーに乗せれば tmux の ttllm ウィンドウに出る。
 logger = logging.getLogger("uvicorn.error")
@@ -37,37 +33,13 @@ SYSTEM_PROMPT = os.getenv(
     "あなたはオリジナルキャラです。名前はコテコ。一人称は「コテコ」、元気いっぱいの明るい女の子として、「〜だよ！」「〜だね！」のような弾んだ口調で、親しみやすく簡潔に話してください。",
 )
 
-_model = None
-_whisperx = None
-
-
-def _load_whisperx():
-    global _whisperx
-    if _whisperx is None:
-        try:
-            import whisperx
-        except ImportError as e:
-            raise HTTPException(
-                503,
-                "whisperx is not installed in the active venv. "
-                "Run `cd ~/AIzunda/whisperX-rocm && uv pip install -e .` first.",
-            ) from e
-        _whisperx = whisperx
-    return _whisperx
+_stt = STTRouter()
 
 
 def get_model():
-    global _model
-    if _model is None:
-        wx = _load_whisperx()
-        _model = wx.load_model(
-            WHISPER_MODEL,
-            WHISPER_DEVICE,
-            compute_type=WHISPER_COMPUTE_TYPE,
-            language=WHISPER_LANGUAGE,
-            vad_method=WHISPER_VAD_METHOD,
-        )
-    return _model
+    """Load the active STT backend (and the fallback, if eager)."""
+    _stt.load()
+    return _stt.active
 
 
 app = FastAPI(title="ttllm bridge", version="0.1.0")
@@ -106,23 +78,12 @@ class VoiceChatResponse(BaseModel):
 
 
 def _transcribe_path(path: str) -> str:
-    model = get_model()
-    wx = _load_whisperx()
-    audio = wx.load_audio(path)
-    audio_sec = len(audio) / 16000  # whisperx は 16kHz mono で読む
-    t0 = time.perf_counter()
+    """音声ファイルパス → 転写テキスト。バックエンドの違いはここから先には出ない。"""
     try:
-        result = model.transcribe(audio, batch_size=WHISPER_BATCH_SIZE)
-    except IndexError:
-        # Silero VAD が発話なしと判定すると WhisperX 内部で inputs[0] が
-        # IndexError を投げる。無音扱いで空文字を返す。
-        return ""
-    stt_ms = (time.perf_counter() - t0) * 1000
-    segments = result.get("segments", []) if isinstance(result, dict) else []
-    text = "".join(seg.get("text", "") for seg in segments).strip()
-    rtf = stt_ms / 1000 / audio_sec if audio_sec else 0
-    logger.info("STT %.0fms (audio %.2fs, RTF %.2f): %r", stt_ms, audio_sec, rtf, text[:40])
-    return text
+        return _stt.transcribe_path(path)
+    except Exception as e:  # noqa: BLE001 — 502 の方が「無言で空文字」より安全
+        logger.exception("STT failed on all backends")
+        raise HTTPException(503, f"STT failed: {e}") from e
 
 
 async def _save_upload(upload: UploadFile) -> str:
@@ -184,11 +145,7 @@ async def health():
         pass
     return {
         "ok": True,
-        "whisper": {
-            "model": WHISPER_MODEL,
-            "device": WHISPER_DEVICE,
-            "loaded": _model is not None,
-        },
+        "stt": _stt.info(),
         "llama": {"url": LLAMA_SERVER_URL, "reachable": llama_reachable},
     }
 
@@ -213,6 +170,83 @@ async def transcribe(audio: UploadFile = File(...)):
         except OSError:
             pass
     return TranscribeResponse(transcript=text)
+
+
+@app.websocket("/transcribe_stream")
+async def transcribe_stream(ws: WebSocket):
+    """Cache-aware streaming STT.
+
+    Client -> server: binary frames of float32 little-endian PCM, 16kHz mono.
+                      A text frame {"type":"end"} closes the utterance.
+    Server -> client: {"type":"partial","text":...} while speaking,
+                      {"type":"final","text":...} once, then the socket closes.
+
+    Only the NeMo backend streams; whisperX has no equivalent, so the client is
+    told to fall back to the one-shot /voice_chat_stream path.
+    """
+    await ws.accept()
+
+    backend = await run_in_threadpool(get_model)
+    if not backend.supports_streaming:
+        await ws.send_json({
+            "type": "error",
+            "error": f"backend {backend.name} does not support streaming",
+            "fallback": "batch",
+        })
+        await ws.close()
+        return
+
+    session = await run_in_threadpool(backend.new_stream)
+    t_started = time.perf_counter()
+    t_last_audio = None
+    last_sent = ""
+
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg["type"] == "websocket.disconnect":
+                return
+
+            if (data := msg.get("bytes")) is not None:
+                pcm = np.frombuffer(data, dtype="<f4")
+                if not pcm.size:
+                    continue
+                t_last_audio = time.perf_counter()
+                text = await run_in_threadpool(session.add_audio, pcm)
+                if text and text != last_sent:
+                    last_sent = text
+                    await ws.send_json({"type": "partial", "text": text})
+                continue
+
+            if (raw := msg.get("text")) is not None:
+                try:
+                    kind = json.loads(raw).get("type")
+                except json.JSONDecodeError:
+                    kind = None
+                if kind != "end":
+                    continue
+
+                t_end = time.perf_counter()
+                text = await run_in_threadpool(session.finish)
+                finalize_ms = (time.perf_counter() - t_end) * 1000
+                logger.info(
+                    "STT[stream] finalize %.0fms (utterance %.2fs): %r",
+                    finalize_ms,
+                    (t_last_audio - t_started) if t_last_audio else 0.0,
+                    text[:40],
+                )
+                await ws.send_json({"type": "final", "text": text, "finalize_ms": round(finalize_ms)})
+                await ws.close()
+                return
+    except WebSocketDisconnect:
+        return
+    except Exception as e:  # noqa: BLE001
+        logger.exception("streaming STT failed")
+        try:
+            await ws.send_json({"type": "error", "error": str(e), "fallback": "batch"})
+            await ws.close()
+        except RuntimeError:
+            pass
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -299,65 +333,93 @@ async def voice_chat_stream(
             return
 
         messages = _build_messages(transcript, system, parsed_history)
-        payload = {
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-
-        reply_parts: List[str] = []
-        llm_t0 = time.perf_counter()
-        ttft_ms: Optional[float] = None
-        n_chunks = 0
-        try:
-            async with httpx.AsyncClient(timeout=LLAMA_TIMEOUT) as client:
-                async with client.stream(
-                    "POST",
-                    f"{LLAMA_SERVER_URL}/v1/chat/completions",
-                    json=payload,
-                ) as r:
-                    r.raise_for_status()
-                    async for line in r.aiter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        data = line[len("data:"):].strip()
-                        if data == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
-                        try:
-                            delta = chunk["choices"][0].get("delta") or {}
-                        except (KeyError, IndexError):
-                            continue
-                        text = delta.get("content") or ""
-                        if text:
-                            if ttft_ms is None:
-                                ttft_ms = (time.perf_counter() - llm_t0) * 1000
-                            n_chunks += 1
-                            reply_parts.append(text)
-                            yield _sse({"type": "token", "text": text})
-        except httpx.HTTPError as e:
-            yield _sse({"type": "error", "error": f"llama-server: {e}"})
-
-        gen_ms = (time.perf_counter() - llm_t0) * 1000
-        if ttft_ms is not None and n_chunks > 1 and gen_ms > ttft_ms:
-            tps = (n_chunks - 1) / ((gen_ms - ttft_ms) / 1000)
-        else:
-            tps = 0.0
-        logger.info(
-            "LLM TTFT %sms, total %.0fms, %d chunks, %.1f chunk/s",
-            f"{ttft_ms:.0f}" if ttft_ms is not None else "n/a",
-            gen_ms, n_chunks, tps,
-        )
-
-        yield _sse({"type": "done", "reply": "".join(reply_parts)})
+        async for event in _llm_sse(messages, temperature, max_tokens):
+            yield event
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/chat_stream")
+async def chat_stream(req: ChatRequest):
+    """テキスト入力版の SSE。STT をストリーミングで済ませた呼び出し元が使う。
+
+    /voice_chat_stream と同じ {token..., done} を返す (transcript は出さない)。
+    """
+    messages = _build_messages(
+        req.text, req.system, [m.model_dump() for m in req.history]
+    )
+
+    async def event_stream():
+        async for event in _llm_sse(messages, req.temperature, req.max_tokens):
+            yield event
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _llm_sse(messages: List[dict], temperature: float, max_tokens: int):
+    """llama-server のトークンストリームを SSE イベントに変換する。"""
+    payload = {
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+        # Qwen3 系は既定で thinking を吐くので、chat template 側で切る。
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+
+    reply_parts: List[str] = []
+    llm_t0 = time.perf_counter()
+    ttft_ms: Optional[float] = None
+    n_chunks = 0
+    try:
+        async with httpx.AsyncClient(timeout=LLAMA_TIMEOUT) as client:
+            async with client.stream(
+                "POST",
+                f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                json=payload,
+            ) as r:
+                r.raise_for_status()
+                async for line in r.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[len("data:"):].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    try:
+                        delta = chunk["choices"][0].get("delta") or {}
+                    except (KeyError, IndexError):
+                        continue
+                    text = delta.get("content") or ""
+                    if text:
+                        if ttft_ms is None:
+                            ttft_ms = (time.perf_counter() - llm_t0) * 1000
+                        n_chunks += 1
+                        reply_parts.append(text)
+                        yield _sse({"type": "token", "text": text})
+    except httpx.HTTPError as e:
+        yield _sse({"type": "error", "error": f"llama-server: {e}"})
+
+    gen_ms = (time.perf_counter() - llm_t0) * 1000
+    if ttft_ms is not None and n_chunks > 1 and gen_ms > ttft_ms:
+        tps = (n_chunks - 1) / ((gen_ms - ttft_ms) / 1000)
+    else:
+        tps = 0.0
+    logger.info(
+        "LLM TTFT %sms, total %.0fms, %d chunks, %.1f chunk/s",
+        f"{ttft_ms:.0f}" if ttft_ms is not None else "n/a",
+        gen_ms, n_chunks, tps,
+    )
+
+    yield _sse({"type": "done", "reply": "".join(reply_parts)})

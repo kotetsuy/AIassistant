@@ -1,0 +1,37 @@
+{
+  "runs": 5,
+  "rows": [
+    {
+      "audio": "human_river",
+      "duration_sec": 3.5,
+      "batch_ms": {
+        "median": 717.1,
+        "min": 533.4,
+        "max": 1102.7,
+        "n": 5
+      },
+      "stream_ms": {
+        "median": 676.0,
+        "min": 330.5,
+        "max": 828.0,
+        "n": 5
+      }
+    },
+    {
+      "audio": "long1",
+      "duration_sec": 10.44,
+      "batch_ms": {
+        "median": 615.6,
+        "min": 535.3,
+        "max": 812.4,
+        "n": 5
+      },
+      "stream_ms": {
+        "median": 412.0,
+        "min": 287.1,
+        "max": 645.6,
+        "n": 5
+      }
+    }
+  ]
+}

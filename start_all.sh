@@ -4,7 +4,7 @@
 # 起動順:
 #   1. VOICEVOX (docker)           :50021
 #   2. llama-server (qwen3.6)      :8080
-#   3. ttllm (WhisperX ↔ llama)    :8001  → /warmup 叩く
+#   3. ttllm (STT[NeMo/whisperX] ↔ llama) :8001  → /warmup 叩く
 #   4. three-vrm (VRM ビューア)    :8000
 #   5. Chrome で zundamon.html を開く
 #   6. vtt を PTT モードで起動 (任意 / ブラウザの 🎤 ボタンがメイン動線)
@@ -37,8 +37,8 @@ THREE_VRM_DIR="/home/$USER/AIassistant/three-vrm"
 VTT_DIR="/home/$USER/AIassistant/vtt"
 
 # three-vrm は aiohttp を使うが system python (Ubuntu 26.04 は 3.14) には入っていない。
-# ttllm と同じ whisperX venv の python で起動する。
-WHISPERX_VENV="${WHISPERX_VENV:-/home/$USER/whisperx/whisperX-rocm/.venv}"
+# ttllm と同じ共用 venv (NeMo + whisperX 同居) の python で起動する。
+TTLLM_VENV="${TTLLM_VENV:-/home/$USER/AIassistant/ttllm/.venv}"
 
 BROWSER_URL="http://localhost:8000/zundamon.html"
 
@@ -95,7 +95,8 @@ command -v google-chrome >/dev/null || warn "google-chrome が見つかりませ
 [[ -f "$QWEN_MODEL"          ]] || die "Qwen モデルが見つかりません: $QWEN_MODEL"
 [[ -x "$TTLLM_DIR/run.sh"    ]] || die "ttllm/run.sh がありません"
 [[ -d "$THREE_VRM_DIR"       ]] || die "three-vrm ディレクトリがありません"
-[[ -x "$WHISPERX_VENV/bin/python" ]] || die "whisperX venv がありません: $WHISPERX_VENV"
+[[ -x "$TTLLM_VENV/bin/python" ]] || die "共用 venv がありません: $TTLLM_VENV (ttllm/install.sh を実行してください)"
+[[ -e "/home/$USER/AIassistant/Speech" ]] || die "Speech symlink がありません: ln -s ../Speech /home/$USER/AIassistant/Speech"
 [[ -x "$VTT_DIR/run.sh"      ]] || die "vtt/run.sh がありません"
 
 # 既存セッションは作り直す。
@@ -145,9 +146,9 @@ new_window "ttllm" "cd ${TTLLM_DIR} && ./run.sh"
 
 wait_http "ttllm" "http://localhost:8001/health" 60
 
-# ---- 4. WhisperX warmup -------------------------------------------------
+# ---- 4. STT warmup ------------------------------------------------------
 
-log "WhisperX を warmup (初回ロードを先に済ませる) ..."
+log "STT を warmup (モデルロード + 初回推論を先に済ませる) ..."
 if curl -sf -X POST -m 300 http://localhost:8001/warmup -o /dev/null; then
     log "  warmup 完了"
 else
@@ -156,7 +157,7 @@ fi
 
 # ---- 5. three-vrm -------------------------------------------------------
 
-new_window "three-vrm" "cd ${THREE_VRM_DIR} && ${WHISPERX_VENV}/bin/python server.py"
+new_window "three-vrm" "cd ${THREE_VRM_DIR} && ${TTLLM_VENV}/bin/python server.py"
 
 wait_http "three-vrm" "http://localhost:8000/status" 30
 

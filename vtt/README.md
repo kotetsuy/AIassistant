@@ -2,7 +2,7 @@
 
 A minimal CLI that captures audio from a USB mic (or any input device) on this
 machine and sends it through the `ttllm` bridge to WhisperX for transcription.
-It sits at the head of the AIzunda pipeline
+It sits at the head of the AIassistant pipeline
 (`vtt → ttllm → llama-server → voicevox → talkinghead/zundavrm`)
 as the voice-input stage.
 
@@ -21,7 +21,7 @@ vtt/
 
 It is a thin client that POSTs WAV to `ttllm`'s `/transcribe`. WhisperX /
 torch-ROCm / ctranslate2-rocm live on the ttllm side
-(`~/AIzunda/whisperx-rocm`), so vtt itself only installs
+(`~/whisperx/whisperX-rocm`), so vtt itself only installs
 `numpy` / `sounddevice` / `soundfile` / `httpx`.
 
 ## Verified configuration
@@ -30,7 +30,7 @@ torch-ROCm / ctranslate2-rocm live on the ttllm side
 | ---- | --- |
 | OS | Ubuntu 24.04.4 LTS (PipeWire) |
 | Input device | USB Composite Device (YunChen, card 1, 48 kHz mono) |
-| ttllm endpoint | `http://localhost:8001` (`~/AIzunda/ttllm/run.sh`) |
+| ttllm endpoint | `http://localhost:8001` (`~/AIassistant/ttllm/run.sh`) |
 | WhisperX venv | `~/whisperx-rocm/.venv` (torch 2.9.1+rocm7.2.0 / ctranslate2 4.6.2 / faster-whisper 1.2.1) |
 | Model | `large-v3` (set via env on the ttllm side) |
 
@@ -42,12 +42,13 @@ Gotcha encountered:
 
 ## Prerequisites
 
-- `~/AIzunda/ttllm` must be running and reachable at `http://localhost:8001`
+- `~/AIassistant/ttllm` must be running and reachable at `http://localhost:8001`
   ```bash
-  cd ~/AIzunda/ttllm && ./run.sh
+  cd ~/AIassistant/ttllm && ./run.sh
   ```
-- `~/AIzunda/whisperx-rocm` must contain whisperx, and ttllm's `WHISPERX_VENV`
-  must point at `~/AIzunda/whisperx-rocm/.venv` (see ttllm's `README.md`).
+- ttllm's shared venv must exist at `~/AIassistant/ttllm/.venv` (built by
+  `ttllm/install.sh`; override with `TTLLM_VENV`). vtt itself only speaks HTTP to
+  ttllm, so it is unaffected by which STT backend is active.
 - `libportaudio2` must be installed
   ```bash
   sudo apt-get install -y libportaudio2
@@ -56,7 +57,7 @@ Gotcha encountered:
 ## Setup
 
 ```bash
-cd ~/AIzunda/vtt
+cd ~/AIassistant/vtt
 ./install.sh
 ```
 
@@ -180,7 +181,7 @@ the llama.cpp reply in one shot. To call directly from a browser
 - Each utterance is cut at 55 s, so long readings get split automatically.
   Re-join on the caller side if you need.
 - If ttllm is not running, `/transcribe` will SystemExit. Start it first
-  in another terminal: `cd ~/AIzunda/ttllm && ./run.sh`.
+  in another terminal: `cd ~/AIassistant/ttllm && ./run.sh`.
 - The first `/transcribe` takes tens of seconds while WhisperX loads. After
   that it stays warm as long as the ttllm process is alive — no reload needed.
 - If you are RDP-ing into this box from a MacBook and want to use the Mac's

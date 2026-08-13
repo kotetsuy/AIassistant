@@ -15,7 +15,7 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
     three-vrm サーバ (port 8000)
          ↓ POST /voice_chat_stream
        ttllm ブリッジ (port 8001)
-         ├─ WhisperX-ROCm (STT, large-v3-turbo)
+         ├─ STT: NeMo Speech (既定) / WhisperX-ROCm (フォールバック)
          └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
          ↓ SSE で token ストリーム
     three-vrm: 文境界で分割 → VOICEVOX (port 50021) → WS 配信
@@ -35,11 +35,14 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 | `~/llama.cpp/build/bin/llama-server` | Qwen3.6 推論 (MoE, アクティブ約 3B) | 8080 |
 | `qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | LLM モデル (MoE, 約 21GB) | — |
 | `qwen3.6/mmproj-F16.gguf` | 視覚エンコーダ (任意、マルチモーダル用) | — |
-| `ttllm/` | FastAPI ブリッジ (WhisperX + llama.cpp) | 8001 |
+| `ttllm/` | FastAPI ブリッジ (STT + llama.cpp)、共用 venv は `ttllm/.venv` | 8001 |
+| `ttllm/stt/` | STT バックエンド: `nemo.py` (既定) / `whisperx.py` (フォールバック) / `streaming.py` | — |
 | `three-vrm/` | aiohttp サーバ + VRM ビューア (HTML/three-vrm) | 8000 |
 | `vtt/` | CLI PTT マイク (任意) | — |
+| `bench/` | STT の速度・精度ベンチマーク (`docs/STT移植_PHASE3.md` 参照) | — |
 | `images/` | VRM ビューア背景 (5 分ごとにローテーション) | — |
 | `vroid/koteko.vrm` | コテコ VRM 1.0 モデル | — |
+| `Speech/` | NeMo Speech の ROCm ブランチ (`~/Speech` へのシンボリックリンク、`rocm-inference`) | — |
 | `whisperX-rocm/` | WhisperX の ROCm フォーク (`~/whisperx/whisperX-rocm` へのシンボリックリンク) | — |
 
 > :pencil: 現在の既定 LLM は **Qwen3.6-35B-A3B (MoE)** です。以前は dense な
@@ -58,6 +61,44 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 - **ブラウザ** : Google Chrome (`AudioContext` を使うため Firefox でも可)
 - **tmux / curl / uv / huggingface_hub (hf CLI)** : 起動スクリプトで使用
 
+## STT バックエンド
+
+音声認識は既定で **NeMo Speech**(`nvidia/nemotron-3.5-asr-streaming-0.6b`)を使い、
+**WhisperX-ROCm** を実行時フォールバックとして残しています。両方が同じ venv に同居して
+いるので、NeMo がロードに失敗しても推論中に落ちても、その場で切り替わって応答を継続します。
+切り替わったことは WARNING ログと `/health` に必ず出します — **無言で別モデルに変わるのが
+一番まずい**ためです。
+
+| `STT_BACKEND` | 挙動 |
+|---|---|
+| `auto`(既定) | NeMo を使い、失敗したら WhisperX へフォールバック |
+| `nemo` | NeMo のみ。失敗は失敗として扱う |
+| `whisperx` | WhisperX のみ(移植前と同じ挙動) |
+
+```bash
+STT_BACKEND=whisperx ./ttllm/run.sh     # 旧バックエンドを強制
+curl -s localhost:8001/health | jq .stt # どちらが実際に使われているか
+```
+
+短い会話文なら**両者の転写は一致**し、NeMo が 2〜3 倍速い一方、**長く固有名詞の多い発話では
+WhisperX の方が正確**です。実測値は [`docs/STT移植_PHASE3.md`](./docs/STT移植_PHASE3.md)。
+
+### ストリーミング STT(任意)
+
+NeMo は cache-aware ストリーミングにも対応しています。発話中からブラウザが生 PCM を
+WebSocket で送るので、**発話の長さによらず、話し終えてから 50〜100ms で転写が確定**します
+(一括経路は 250〜550ms で、発話が長いほど伸びます)。
+
+**既定は off** です。ビューアの URL に `?stt=stream` を付けるか、
+`localStorage.sttStreaming = "1"` で永続化します:
+
+```
+http://localhost:8000/zundamon.html?stt=stream
+```
+
+一括経路は一切変更していないので、off のときや使えないとき(WhisperX バックエンド稼働中など)は
+従来どおり動きます。
+
 詳細なセットアップは各サブディレクトリの `READMEJ.md` を参照:
 `ttllm/READMEJ.md` / `vtt/READMEJ.md` / `three-vrm/READMEJ.md` / `voicevox/READMEJ.md` /
 `whisperX-rocm/READMEJ.md`。
@@ -66,15 +107,19 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 
 ## 1. リポジトリと依存物の取得
 
-本体リポジトリには `whisperX-rocm` / `llama.cpp` / `qwen3.6` をシンボリックリンクで参照する構造になっているので、まず本体と依存物を **ホームディレクトリ直下** に並べて配置します。
+本体リポジトリには `whisperX-rocm` / `Speech` / `llama.cpp` / `qwen3.6` をシンボリックリンクで参照する構造になっているので、まず本体と依存物を **ホームディレクトリ直下** に並べて配置します。
 
 ```bash
 cd ~
 git clone https://github.com/kotetsuy/AIassistant.git
 git clone https://github.com/ggml-org/llama.cpp.git
+
+# NeMo Speech — 既定の STT バックエンド。ROCm 対応差分は rocm-inference
+# ブランチにしか入っていないので、必ずこのブランチを取得すること。
+git clone -b rocm-inference https://github.com/kotetsuy/Speech.git
 ```
 
-WhisperX の ROCm フォークと CTranslate2 の ROCm フォークも別途必要です:
+フォールバック STT 用に、WhisperX の ROCm フォークと CTranslate2 の ROCm フォークも別途必要です:
 
 ```bash
 mkdir -p ~/whisperx && cd ~/whisperx
@@ -86,7 +131,7 @@ git clone https://github.com/<your_ctranslate2_rocm_fork>/ctranslate2-rocm.git
 > `whisperX-rocm` はそこへのシンボリックリンク)。ttllm の `run.sh` / `install.sh` もこのパスを
 > 既定にしています。以前は `~/AIzunda/whisperX-rocm` に置いていましたが、OS 更新 (Ubuntu
 > 26.04 / system python 3.14) で旧 venv が壊れたため `~/whisperx` 側に統一しました。
-> リンク先を変える場合は `ln -sfn <path> whisperX-rocm` と `WHISPERX_VENV` を合わせてください。
+> リンク先を変える場合は `ln -sfn <path> whisperX-rocm` を変更してください。
 
 こちらも参照してください
 
@@ -221,38 +266,62 @@ ls -lh ~/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 
 ## 6. AIassistant 内のシンボリックリンクを張る
 
-`~/AIassistant` 配下から `llama.cpp` / `whisperX-rocm` / `qwen3.6` を相対パスで参照できるようにします。
+`~/AIassistant` 配下から `llama.cpp` / `whisperX-rocm` / `Speech` / `qwen3.6` を相対パスで
+参照できるようにします。**AIassistant 内のファイルは絶対パスではなく必ずこのシンボリック
+リンク経由で参照します。**
 
 ```bash
 cd ~/AIassistant
 ln -sf ../llama.cpp llama.cpp
 ln -sf ../whisperx/whisperX-rocm whisperX-rocm
+ln -sf ../Speech Speech
 ln -sf ../qwen3.6 qwen3.6
 
 ls -la
 # llama.cpp -> ../llama.cpp
 # qwen3.6 -> ../qwen3.6
+# Speech -> ../Speech
 # whisperX-rocm -> ../whisperx/whisperX-rocm
+```
+
+`Speech` は **`rocm-inference` ブランチ**である必要があります。NeMo の ROCm 対応差分は
+このブランチにしか無く、無いとモデルのロードに失敗します。`start_all.sh` はシンボリック
+リンクの存在を、`ttllm/install.sh` はブランチを確認します。
+
+```bash
+git -C ~/Speech branch --show-current   # rocm-inference
 ```
 
 ---
 
-## 7. ttllm ブリッジの依存を venv に追加
+## 7. 共用 venv を構築
 
 ```bash
 cd ~/AIassistant/ttllm
 ./install.sh
 ```
 
-`fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` が **WhisperX-ROCm の venv に追加** されます (専用 venv は作らず共有)。`install.sh` / `run.sh` は既定で
-`~/whisperx/whisperX-rocm/.venv` を使います (別の場所なら `WHISPERX_VENV` で上書き)。
+**`ttllm/.venv`** が作られ、**2 つの STT バックエンドとブリッジと three-vrm** がすべてここに入ります:
+
+- `torch==2.8.0+rocm7.12.0`(gfx1151 専用 wheel インデックス)
+  — WhisperX が `torchaudio<2.9` を要求するため 2.8 系に固定。NeMo は `>=2.6` なので問題ない
+- `whisperx` とローカルビルドの ROCm 版 `ctranslate2`
+- `nemo-toolkit[asr]`(`Speech` シンボリックリンク経由)
+- `fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` / `aiohttp`
+
+NeMo モデルの事前キャッシュも行います。`run.sh` は `HF_HUB_OFFLINE=1` で起動するため、
+キャッシュが無いと起動できません。
+
+場所を変えたい場合は `TTLLM_VENV` で上書きできます。`~/whisperx/whisperX-rocm/.venv` の
+単体 venv はそのまま残ります(これは別に作られる追加の venv です)。
 
 > :pencil: **three-vrm も同じ venv の python で起動します。** system python (Ubuntu 26.04 は
-> 3.14) には `aiohttp` が無いため、`start_all.sh` は `$WHISPERX_VENV/bin/python server.py`
-> で three-vrm を起動します。venv 側に `aiohttp` が入っていることだけ確認してください:
+> 3.14) には `aiohttp` が無いため、`start_all.sh` は `$TTLLM_VENV/bin/python server.py`
+> で three-vrm を起動します。`install.sh` が `aiohttp` も入れますが、別の方法で venv を
+> 作った場合は:
 >
 > ```bash
-> VIRTUAL_ENV=~/whisperx/whisperX-rocm/.venv uv pip install aiohttp
+> VIRTUAL_ENV=~/AIassistant/ttllm/.venv uv pip install aiohttp
 > ```
 >
 > 手で起動する場合も `python3 server.py` ではなく venv の python を使ってください。
