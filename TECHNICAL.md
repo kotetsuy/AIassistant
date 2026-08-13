@@ -270,10 +270,12 @@ Accuracy (CER, after normalising surface conventions) is 0.0% for all three conf
 nine short utterances, and **B and C match exactly on every clip** — streaming costs no
 accuracy. On long clips **whisperX wins** (9.9% vs 21.1% on the proper-noun-heavy one).
 
-End-to-end (speech end → first audio) went 717ms → 676ms at 3.5s and 616ms → 412ms at
-10.4s: a much weaker effect, because generating and synthesising the first sentence
-dominates. The honest summary is that streaming **shortens the slow tail** rather than
-making every turn faster.
+End-to-end (speech end → first audio, 3.5s utterance, 30 runs each) is
+**whisperX 895ms → NeMo batch 735ms / streaming 614ms** (median). The distribution matters
+more than the median: **11/30 (37%) exceeded one second on whisperX, 0/30 on NeMo**.
+Medians for this metric swing between 895 and 1074ms across sessions, so read the
+**fraction over one second** rather than a single median — generating and synthesising the
+first sentence dominates the interval.
 
 Details in `docs/STT移植_PHASE3.md`; raw data in `bench/results.json`.
 

@@ -45,33 +45,52 @@ async def main() -> None:
         dur = len(audio) / sr
 
         batch = [await _measure_batch(webm) for _ in range(args.runs)]
-        stream = [await _measure_stream(audio) for _ in range(args.runs)]
         batch = [x for x in batch if x is not None]
-        stream = [x for x in stream if x is not None]
-
         row = {
             "audio": wav.stem,
             "duration_sec": round(dur, 2),
             "batch_ms": _stats(batch),
-            "stream_ms": _stats(stream),
         }
-        results.append(row)
-        print(
-            f"{wav.stem:16s} ({dur:5.2f}s)  "
-            f"batch {row['batch_ms']['median']:6.0f}ms [{row['batch_ms']['min']:.0f}-{row['batch_ms']['max']:.0f}]   "
-            f"stream {row['stream_ms']['median']:6.0f}ms [{row['stream_ms']['min']:.0f}-{row['stream_ms']['max']:.0f}]"
-        )
+        line = (f"{wav.stem:16s} ({dur:5.2f}s)  "
+                f"batch {row['batch_ms']['median']:6.0f}ms "
+                f"[{row['batch_ms']['min']:.0f}-{row['batch_ms']['max']:.0f}] "
+                f"over1s={row['batch_ms']['over_1s']}/{row['batch_ms']['n']}")
 
+        if args.stream:
+            stream = [await _measure_stream(audio) for _ in range(args.runs)]
+            stream = [x for x in stream if x is not None]
+            row["stream_ms"] = _stats(stream)
+            line += (f"   stream {row['stream_ms']['median']:6.0f}ms "
+                     f"[{row['stream_ms']['min']:.0f}-{row['stream_ms']['max']:.0f}] "
+                     f"over1s={row['stream_ms']['over_1s']}/{row['stream_ms']['n']}")
+
+        results.append(row)
+        print(line)
+
+    # Results are keyed by backend label so the whisperX baseline and the NeMo
+    # numbers can be collected across separate runs (the backend is chosen when
+    # ttllm starts, so one process cannot measure both).
     out = BENCH_DIR / "results_e2e.json"
-    out.write_text(json.dumps({"runs": args.runs, "rows": results}, ensure_ascii=False, indent=2),
-                   encoding="utf-8")
-    print(f"\nwrote {out}")
+    merged = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
+    if "rows" in merged:      # migrate the old single-backend format
+        merged = {}
+    merged[args.label] = {"runs": args.runs, "rows": results}
+    out.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"\nwrote {out} (label: {args.label})")
 
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--runs", type=int, default=5)
     p.add_argument("--audio", nargs="+", default=["human_river", "long1"])
+    p.add_argument(
+        "--label", default="nemo",
+        help="key to store these results under, e.g. the active STT_BACKEND",
+    )
+    p.add_argument(
+        "--no-stream", dest="stream", action="store_false",
+        help="skip the streaming path (whisperX has none — it would hang waiting for audio)",
+    )
     return p.parse_args()
 
 
@@ -143,12 +162,17 @@ def _to_webm(wav: Path) -> bytes:
 
 def _stats(xs: list) -> dict:
     if not xs:
-        return {"median": 0, "min": 0, "max": 0, "n": 0}
+        return {"median": 0, "min": 0, "max": 0, "n": 0, "over_1s": 0, "samples": []}
     return {
         "median": round(statistics.median(xs), 1),
+        "mean": round(statistics.fmean(xs), 1),
         "min": round(min(xs), 1),
         "max": round(max(xs), 1),
         "n": len(xs),
+        # How often the user waits more than a second is more legible than the
+        # spread alone, given how wide LLM generation makes the distribution.
+        "over_1s": sum(1 for x in xs if x > 1000),
+        "samples": [round(x, 1) for x in sorted(xs)],
     }
 
 
