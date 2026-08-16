@@ -170,7 +170,7 @@ curl -s http://localhost:50021/version
 cd ~/llama.cpp/build/bin
 ./llama-server \
     -m ~/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf \
-    --host 127.0.0.1 --port 8080 \
+    --host 127.0.0.1 --port 9931 \
     -ngl 99 -c 8192 \
     --spec-type draft-mtp
 ```
@@ -197,7 +197,7 @@ cd ~/AIassistant/three-vrm && python3 server.py
 | サービス      | ポート | 主要エンドポイント |
 | ------------- | ------ | ------------------ |
 | VOICEVOX      | 50021  | `/audio_query`, `/synthesis` |
-| llama-server  | 8080   | `/v1/chat/completions` (OpenAI 互換) |
+| llama-server  | 9931   | `/v1/chat/completions` (OpenAI 互換) |
 | ttllm         | 8001   | `/voice_chat`, `/chat`, `/transcribe`, `/warmup`, `/health` |
 | three-vrm     | 8000   | `/zundamon.html`, `/voice_chat_speak`, `/speak`, `/ws`, `/vrm/*` |
 
@@ -264,7 +264,7 @@ multipart/form-data:
 ```bash
 # 各サービスの疎通
 curl -s http://localhost:50021/version
-curl -s http://localhost:8080/health
+curl -s http://localhost:9931/health
 curl -s http://localhost:8001/health
 
 # three-vrm 経由でテキスト → VOICEVOX → VRM 口パク

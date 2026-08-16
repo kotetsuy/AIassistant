@@ -25,7 +25,7 @@ from stt import STTRouter
 # uvicorn 配下なので uvicorn.error ロガーに乗せれば tmux の ttllm ウィンドウに出る。
 logger = logging.getLogger("uvicorn.error")
 
-LLAMA_SERVER_URL = os.getenv("LLAMA_SERVER_URL", "http://localhost:8080").rstrip("/")
+LLAMA_SERVER_URL = os.getenv("LLAMA_SERVER_URL", "http://localhost:9931").rstrip("/")
 LLAMA_TIMEOUT = float(os.getenv("LLAMA_TIMEOUT", "120"))
 
 SYSTEM_PROMPT = os.getenv(

@@ -56,7 +56,7 @@ to the WhisperX venv.
 cd ~/llama.cpp/build/bin
 ./llama-server \
     -m ~/AIassistant/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
-    --host 127.0.0.1 --port 8080 \
+    --host 127.0.0.1 --port 9931 \
     -ngl 99 -c 8192
 ```
 
@@ -134,7 +134,7 @@ curl -X POST http://localhost:8001/warmup
 | `WHISPER_DEVICE`       | `cuda`                  | GPU is used through ROCm's HIP layer |
 | `WHISPER_BATCH_SIZE`   | `8`                     | |
 | `WHISPER_VAD_METHOD`   | `silero`                | `silero` / `pyannote` |
-| `LLAMA_SERVER_URL`     | `http://localhost:8080` | URL of llama-server |
+| `LLAMA_SERVER_URL`     | `http://localhost:9931` | URL of llama-server |
 | `LLAMA_TIMEOUT`        | `120`                   | seconds |
 | `SYSTEM_PROMPT`        | Zundamon persona        | Default system prompt |
 | `BRIDGE_HOST`          | `0.0.0.0`               | |

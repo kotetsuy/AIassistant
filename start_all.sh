@@ -3,7 +3,7 @@
 #
 # 起動順:
 #   1. VOICEVOX (docker)           :50021
-#   2. llama-server (qwen3.6)      :8080
+#   2. llama-server (qwen3.6 MoE)  :9931
 #   3. ttllm (STT[NeMo/whisperX] ↔ llama) :8001  → /warmup 叩く
 #   4. three-vrm (VRM ビューア)    :8000
 #   5. Chrome で zundamon.html を開く
@@ -25,7 +25,7 @@ SESSION="aiassistant"
 LLAMA_BIN="/home/$USER/llama.cpp/build/bin/llama-server"
 QWEN_MODEL="/home/$USER/AIassistant/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
 LLAMA_HOST="127.0.0.1"
-LLAMA_PORT="8080"
+LLAMA_PORT="9931"
 LLAMA_CTX="8192"
 LLAMA_NGL="99"
 

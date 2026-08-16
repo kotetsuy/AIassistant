@@ -17,7 +17,7 @@ Browser (three-vrm)
          ↓ POST /voice_chat_stream
        ttllm bridge (port 8001)
          ├─ STT: NeMo Speech (default) or WhisperX-ROCm (fallback)
-         └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+         └─ llama-server (Qwen3.6-35B-A3B MoE, port 9931)
          ↓ Token stream over SSE
     three-vrm: split at sentence boundaries → VOICEVOX (port 50021) → push over WS
          ↓ WS (audio + visemes)
@@ -34,7 +34,7 @@ Browser (three-vrm)
 | Path | Role | Port |
 |---|---|---|
 | `voicevox/` | VOICEVOX Engine (Docker, CPU inference) | 50021 |
-| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 inference (MoE, ~3B active) | 8080 |
+| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 inference (MoE, ~3B active) | 9931 |
 | `qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | LLM model (MoE, ~21GB) | — |
 | `qwen3.6/mmproj-F16.gguf` | Vision encoder (optional, for multimodal) | — |
 | `ttllm/` | FastAPI bridge (STT + llama.cpp), shared venv at `ttllm/.venv` | 8001 |
@@ -51,6 +51,11 @@ Browser (three-vrm)
 > Qwen3.6-27B with MTP speculative decoding, but switched because the MoE model is faster on
 > bandwidth-limited iGPUs. See [`TECHNICAL.md`](./TECHNICAL.md) for the rationale and
 > measurements.
+>
+> **Qwen3.8-27B was evaluated on 2026-08-16 and deferred.** It is dense, not MoE, so it runs
+> at 11 tok/s here and pushes time-to-first-audio over a second in 14 of 30 runs (the MoE:
+> 0 of 30). We will revisit it when a MoE build in this size class ships. Numbers are in
+> [`TECHNICAL.md`](./TECHNICAL.md).
 
 ## STT backends
 
@@ -388,7 +393,7 @@ cd ~/AIassistant
 The following services come up serially, with HTTP health checks gating each step:
 
 1. VOICEVOX (Docker, port 50021)
-2. llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+2. llama-server (Qwen3.6-35B-A3B MoE, port 9931)
 3. ttllm bridge (port 8001)
 4. STT warmup (POSTs to `/warmup` to load the model and run one throwaway inference)
 5. three-vrm server (port 8000)
@@ -430,7 +435,7 @@ If the first audio comes back in roughly 1 second, you're good.
 | window | command |
 |---|---|
 | 0 voicevox | `docker logs -f voicevox_engine` |
-| 1 llama | `llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --port 8080 -ngl 99 -c 8192 -fit off` |
+| 1 llama | `llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --port 9931 -ngl 99 -c 8192 -fit off` |
 | 2 ttllm | `ttllm/run.sh` (uvicorn) |
 | 3 three-vrm | `python3 three-vrm/server.py` |
 | 4 vtt | `vtt/run.sh --device USB` (CLI PTT, optional) |

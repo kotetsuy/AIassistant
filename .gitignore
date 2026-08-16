@@ -62,6 +62,7 @@ whisperX-rocm/
 /ctranslate2-rocm
 /llama.cpp
 /qwen3.6
+/qwen3.8
 
 # ================================
 # ランタイム出力 / キャプチャ

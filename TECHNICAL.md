@@ -14,7 +14,7 @@ Browser (three-vrm)
          ↓ POST /voice_chat_stream
        ttllm bridge (port 8001)
          ├─ STT: NeMo Speech (default) / WhisperX-ROCm (fallback)
-         └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+         └─ llama-server (Qwen3.6-35B-A3B MoE, port 9931)
          ↓ Token stream over SSE
     three-vrm: split at sentence boundaries → VOICEVOX (port 50021) → push over WS
          ↓ WS (audio + visemes)
@@ -125,6 +125,44 @@ python3 gguf-py/gguf/scripts/gguf_dump.py --no-tensors \
 
 MTP support was merged in llama.cpp PR
 [#22673](https://github.com/ggml-org/llama.cpp/pull/22673).
+
+### Evaluated and deferred: Qwen3.8-27B (2026-08-16)
+
+`Qwen/Qwen3.8-27B` was evaluated as a replacement and **rejected for now**. It is a
+**dense** model, not a MoE — confirmed from the GGUF metadata, not from the name:
+
+| | Qwen3.8-27B | Qwen3.6-35B-A3B |
+|---|---|---|
+| `general.architecture` | `qwen35` | `qwen35moe` |
+| `expert_count` | key absent | 256 (8 used) |
+| `*_exps` tensors | 0 | 120 |
+
+So every token reads all ~19GB of weights. Measured on this machine: **89.9 ms/token
+(11.1 tok/s)**, against the MoE's ~50 tok/s.
+
+End-to-end effect (`bench/bench_e2e.py`, 30 runs, `human_river` 3.5s, NeMo STT — stored in
+`bench/results_e2e.json` under `nemo-qwen3.8-27B`):
+
+| Path | Model | Median | Mean | Min | Max | Over 1s |
+|---|---|---|---|---|---|---|
+| batch | Qwen3.6-35B-A3B (MoE) | 735 ms | 723 ms | 415 ms | 939 ms | **0/30** |
+| batch | Qwen3.8-27B (dense) | 829 ms | 1204 ms | 799 ms | 2222 ms | **14/30** |
+| stream | Qwen3.6-35B-A3B (MoE) | 615 ms | 608 ms | 353 ms | 903 ms | **0/30** |
+| stream | Qwen3.8-27B (dense) | 772 ms | 1171 ms | 743 ms | 3721 ms | **12/30** |
+
+The median barely moves, but the distribution breaks into clusters (batch: ~810 / ~1445 /
+~2100 ms). The gaps are ~640 ms ≈ 7 tokens at 90 ms/token: time-to-first-audio is set by how
+many tokens the first sentence takes, and at 11 tok/s that length dominates the result. The
+MoE kept all 30 runs under a second; the dense 27B only manages 16.
+
+**Conclusion: stay on Qwen3.6-35B-A3B until a MoE build of Qwen3.8 in this size class
+ships.** (`Qwen/Qwen3.8-2.4T-A95B` is a MoE, but far too large for this machine.) Two things
+worth revisiting when that happens, both of which would also help the dense model:
+
+- `ttllm/run.sh` has a `SYSTEM_PROMPT` that constrains the first sentence to 15 characters,
+  currently commented out. It targets exactly the variance above.
+- `ggml-org/Qwen3.8-27B-GGUF` ships `mtp-Qwen3.8-27B-Q4_0.gguf` (~1.7GB) for
+  `--spec-type draft-mtp`.
 
 ## VRM viewer effects
 

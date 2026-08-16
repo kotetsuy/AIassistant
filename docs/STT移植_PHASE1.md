@@ -122,7 +122,7 @@ WARNING STT falling back from nemo to whisperx and staying there — inference f
     "loaded": true,
     "supports_streaming": false
   },
-  "llama": { "url": "http://localhost:8080", "reachable": false }
+  "llama": { "url": "http://localhost:9931", "reachable": false }
 }
 ```
 

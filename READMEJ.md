@@ -16,7 +16,7 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
          ↓ POST /voice_chat_stream
        ttllm ブリッジ (port 8001)
          ├─ STT: NeMo Speech (既定) / WhisperX-ROCm (フォールバック)
-         └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+         └─ llama-server (Qwen3.6-35B-A3B MoE, port 9931)
          ↓ SSE で token ストリーム
     three-vrm: 文境界で分割 → VOICEVOX (port 50021) → WS 配信
          ↓ WS (audio + visemes)
@@ -32,7 +32,7 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 | パス | 役割 | ポート |
 |---|---|---|
 | `voicevox/` | VOICEVOX Engine (Docker, CPU 推論) | 50021 |
-| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 推論 (MoE, アクティブ約 3B) | 8080 |
+| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 推論 (MoE, アクティブ約 3B) | 9931 |
 | `qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | LLM モデル (MoE, 約 21GB) | — |
 | `qwen3.6/mmproj-F16.gguf` | 視覚エンコーダ (任意、マルチモーダル用) | — |
 | `ttllm/` | FastAPI ブリッジ (STT + llama.cpp)、共用 venv は `ttllm/.venv` | 8001 |
@@ -48,6 +48,11 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 > :pencil: 現在の既定 LLM は **Qwen3.6-35B-A3B (MoE)** です。以前は dense な
 > Qwen3.6-27B + MTP 投機デコードを使っていましたが、帯域が細い iGPU では MoE の方が
 > 速いため切り替えました。経緯と実測は [`TECHNICALJ.md`](./TECHNICALJ.md) を参照。
+>
+> **Qwen3.8-27B は 2026-08-16 に評価し、採用を見送りました。** MoE ではなく dense なので
+> 本機では 11 tok/s に留まり、初音までの時間が 30 回中 14 回 1 秒を超えます (MoE は 0 回)。
+> このクラスで MoE 版が出た時点で再評価します。実測値は
+> [`TECHNICALJ.md`](./TECHNICALJ.md) に記載。
 
 ### 前提
 
@@ -375,7 +380,7 @@ cd ~/AIassistant
 以下が直列で立ち上がり、HTTP health check で待ち合わせます:
 
 1. VOICEVOX (Docker, port 50021)
-2. llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+2. llama-server (Qwen3.6-35B-A3B MoE, port 9931)
 3. ttllm ブリッジ (port 8001)
 4. WhisperX warmup (`POST /warmup` を叩いて初回のモデルロードを済ませる)
 5. three-vrm サーバ (port 8000)
@@ -415,7 +420,7 @@ tmux attach -t aiassistant   # ログを見る
 | window | コマンド |
 |---|---|
 | 0 voicevox | `docker logs -f voicevox_engine` |
-| 1 llama | `llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --port 8080 -ngl 99 -c 8192 -fit off` |
+| 1 llama | `llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --port 9931 -ngl 99 -c 8192 -fit off` |
 | 2 ttllm | `ttllm/run.sh` (uvicorn) |
 | 3 three-vrm | `python3 three-vrm/server.py` |
 | 4 vtt | `vtt/run.sh --device USB` (CLI PTT, 任意) |

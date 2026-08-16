@@ -14,7 +14,7 @@
          ↓ POST /voice_chat_stream
        ttllm ブリッジ (port 8001)
          ├─ STT: NeMo Speech (既定) / WhisperX-ROCm (フォールバック)
-         └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+         └─ llama-server (Qwen3.6-35B-A3B MoE, port 9931)
          ↓ SSE で token ストリーム
     three-vrm: 文境界で分割 → VOICEVOX (port 50021) → WS 配信
          ↓ WS (audio + visemes)
@@ -120,6 +120,44 @@ python3 gguf-py/gguf/scripts/gguf_dump.py --no-tensors \
 
 MTP サポートは llama.cpp の PR [#22673](https://github.com/ggml-org/llama.cpp/pull/22673)
 でマージされています。
+
+### 評価して見送り: Qwen3.8-27B (2026-08-16)
+
+`Qwen/Qwen3.8-27B` を後継として評価し、**現時点では採用を見送りました**。これは MoE ではなく
+**dense** モデルです。名前ではなく GGUF のメタデータで確認しています:
+
+| | Qwen3.8-27B | Qwen3.6-35B-A3B |
+|---|---|---|
+| `general.architecture` | `qwen35` | `qwen35moe` |
+| `expert_count` | キーなし | 256 (使用 8) |
+| `*_exps` テンソル | 0 個 | 120 個 |
+
+つまり 1 トークンごとに約 19GB の重みを全部読みます。本機での実測は
+**89.9 ms/token (11.1 tok/s)**、MoE の約 50 tok/s に対して大幅に低下します。
+
+初音までの時間への影響 (`bench/bench_e2e.py`、30 回、`human_river` 3.5 秒、NeMo STT。
+生データは `bench/results_e2e.json` の `nemo-qwen3.8-27B`):
+
+| 経路 | モデル | 中央値 | 平均 | 最小 | 最大 | 1 秒超 |
+|---|---|---|---|---|---|---|
+| batch | Qwen3.6-35B-A3B (MoE) | 735 ms | 723 ms | 415 ms | 939 ms | **0/30** |
+| batch | Qwen3.8-27B (dense) | 829 ms | 1204 ms | 799 ms | 2222 ms | **14/30** |
+| stream | Qwen3.6-35B-A3B (MoE) | 615 ms | 608 ms | 353 ms | 903 ms | **0/30** |
+| stream | Qwen3.8-27B (dense) | 772 ms | 1171 ms | 743 ms | 3721 ms | **12/30** |
+
+中央値の悪化は小さいのですが、分布が明確に割れます (batch で約 810 / 1445 / 2100 ms の 3 山)。
+クラスタ間隔の約 640 ms は 90 ms/token で約 7 トークンぶんです。初音は「第 1 文が出るまで」で
+決まるので、11 tok/s では第 1 文の長さが支配項になります。MoE は 30 回すべて 1 秒以内でしたが、
+dense 27B は 16 回しか収まりません。
+
+**結論: このクラスで Qwen3.8 の MoE 版が出るまで Qwen3.6-35B-A3B を継続します。**
+(`Qwen/Qwen3.8-2.4T-A95B` は MoE ですが本機には大きすぎます。) MoE 版が出たときに
+再検討する価値がある項目が 2 つあり、どちらも dense でも効きます:
+
+- `ttllm/run.sh` に第 1 文を 15 文字以内に縛る `SYSTEM_PROMPT` がコメントアウトされたまま
+  残っています。上のばらつきにちょうど効く設定です。
+- `ggml-org/Qwen3.8-27B-GGUF` に `--spec-type draft-mtp` 用の
+  `mtp-Qwen3.8-27B-Q4_0.gguf` (約 1.7GB) があります。
 
 ## VRM ビューアの演出
 

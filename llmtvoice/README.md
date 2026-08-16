@@ -171,7 +171,7 @@ curl -s http://localhost:50021/version
 cd ~/AIzunda/llama.cpp/build/bin
 ./llama-server \
     -m ~/AIzunda/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
-    --host 127.0.0.1 --port 8080 \
+    --host 127.0.0.1 --port 9931 \
     -ngl 99 -c 8192
 ```
 
@@ -198,7 +198,7 @@ bottom-right.
 | Service       | Port  | Main endpoints |
 | ------------- | ----- | -------------- |
 | VOICEVOX      | 50021 | `/audio_query`, `/synthesis` |
-| llama-server  | 8080  | `/v1/chat/completions` (OpenAI-compatible) |
+| llama-server  | 9931  | `/v1/chat/completions` (OpenAI-compatible) |
 | ttllm         | 8001  | `/voice_chat`, `/chat`, `/transcribe`, `/warmup`, `/health` |
 | three-vrm     | 8000  | `/zundamon.html`, `/voice_chat_speak`, `/speak`, `/ws`, `/vrm/*` |
 
@@ -265,7 +265,7 @@ You can change the default in `SPEAKER_ID` near the top of `zundamon.html`.
 ```bash
 # Per-service reachability
 curl -s http://localhost:50021/version
-curl -s http://localhost:8080/health
+curl -s http://localhost:9931/health
 curl -s http://localhost:8001/health
 
 # Text → VOICEVOX → VRM lip-sync via three-vrm

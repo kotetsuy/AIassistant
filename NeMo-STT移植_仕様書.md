@@ -39,7 +39,7 @@ Browser (three-vrm/TalkingHead/zundamon.html)
          ↓ POST /voice_chat_stream (multipart)
        ttllm bridge (:8001)
          ├─ WhisperX-ROCm (STT)      ← ここを差し替える
-         └─ llama-server (:8080)
+         └─ llama-server (:9931)
          ↓ SSE (transcript → token…)
     three-vrm: 文単位で VOICEVOX (:50021) → WS で音声+viseme 配信
 ```

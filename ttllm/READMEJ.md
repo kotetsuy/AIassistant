@@ -37,7 +37,7 @@ cd ~/AIassistant/ttllm
 cd ~/llama.cpp/build/bin
 ./llama-server \
     -m ~/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf \
-    --host 127.0.0.1 --port 8080 \
+    --host 127.0.0.1 --port 9931 \
     -ngl 99 -c 8192 \
     --spec-type draft-mtp
 ```
@@ -141,7 +141,7 @@ curl -s localhost:8001/health | jq .stt
 | `WHISPER_DEVICE`        | `cuda`                         | ROCm の HIP レイヤー経由で GPU が使われる |
 | `WHISPER_BATCH_SIZE`    | `8`                            | |
 | `WHISPER_VAD_METHOD`    | `silero`                       | `silero` / `pyannote` |
-| `LLAMA_SERVER_URL`      | `http://localhost:8080`        | llama-server の URL |
+| `LLAMA_SERVER_URL`      | `http://localhost:9931`        | llama-server の URL |
 | `LLAMA_TIMEOUT`         | `120`                          | 秒 |
 | `SYSTEM_PROMPT`         | コテコ persona (アルヨ調)      | 既定システムプロンプト |
 | `BRIDGE_HOST`           | `0.0.0.0`                      | |

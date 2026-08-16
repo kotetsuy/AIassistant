@@ -77,7 +77,7 @@ stop_pids() {
 
 # "<port>|<ラベル>|<cmdline に期待する正規表現>"
 PORT_TARGETS=(
-    "8080|llama-server|llama-server"
+    "9931|llama-server|llama-server"
     "8001|ttllm|uvicorn"
     "8000|three-vrm|server\.py"
 )
