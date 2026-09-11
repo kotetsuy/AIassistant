@@ -150,6 +150,12 @@ curl -X POST http://localhost:8001/warmup
 
 ## STT backends
 
+For `STT_BACKEND=auto` or `nemo`, `run.sh` sets `GPU_MAX_HW_QUEUES=1`
+before HIP initialization, overriding any inherited value. This avoids persistent
+100% idle GPU usage after NeMo GPU graph execution on this machine. Explicit
+`whisperx` mode leaves this variable unchanged. An `auto` process keeps the value
+at `1` even after falling back to WhisperX.
+
 `STT_BACKEND=auto` uses NeMo and switches to WhisperX if NeMo fails to load or
 raises mid-request, then stays there. The failing request itself is retried on
 the fallback, so nothing is dropped.

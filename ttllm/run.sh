@@ -22,6 +22,12 @@ export LD_LIBRARY_PATH="/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:${LD
 export STT_BACKEND="${STT_BACKEND:-auto}"
 export STT_FALLBACK="${STT_FALLBACK:-whisperx}"
 
+# NeMo の HIP グラフ実行後に GPU 使用率が 100% のままになる現象を回避する。
+# HIP 初期化前に設定する必要がある。auto は最初に NeMo をロードする。
+case "${STT_BACKEND,,}" in
+    auto|nemo) export GPU_MAX_HW_QUEUES=1 ;;
+esac
+
 # 初音(最初の発話)を早めるため、最初の一文を短く言い切らせる。
 # 文境界 [。！？\n] が早く出るほど three-vrm が早く VOICEVOX へ渡せる。
 # export SYSTEM_PROMPT="${SYSTEM_PROMPT:-あなたはオリジナルキャラです。名前はコテコ。一人称は「コテコ」、元気いっぱいの明るい女の子として、「〜だよ！」「〜だね！」のような弾んだ口調で、親しみやすく簡潔に話してください。返答は必ず短い一文から始めること。最初の一文は15文字以内の相づち・結論・呼びかけにして、すぐ「。」で言い切る。詳しい説明はそのあとの文に分けて続ける。}"

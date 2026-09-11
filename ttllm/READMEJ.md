@@ -115,6 +115,11 @@ curl -X POST http://localhost:8001/warmup
 | `STT_FALLBACK`          | `whisperx`  | `auto` 時のフォールバック先。`none` で無効化 |
 | `STT_EAGER_FALLBACK`    | `1`         | warmup でフォールバック先も先読みする。`0` にすると初回フォールバック時にロード待ちが発生する |
 
+`run.sh` は `STT_BACKEND=auto` / `nemo` の場合、HIP 初期化前に
+`GPU_MAX_HW_QUEUES=1` を設定します（既存の値も上書き）。本機で NeMo の GPU グラフ実行後に
+GPU 使用率が待機中も 100% に張り付く現象を回避するためです。`whisperx` 指定時はこの変数を変更しません。
+`auto` で WhisperX にフォールバックした場合も、同じプロセスでは値は `1` のままです。
+
 フォールバックが発動したときは **WARNING ログ**が出て、`/health` の
 `stt.fallback_active` と `stt.last_error` に反映されます。無言で別モデルに変わることはありません。
 
