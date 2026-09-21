@@ -100,8 +100,8 @@ The one-shot path is untouched and still used whenever streaming is off or unava
 
 - **OS** : Ubuntu 26.04 (resolute)
 - **GPU** : AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1151, 48GB VRAM)
-- **ROCm** : 7.14.0 (`/opt/rocm`). On Ubuntu 26.04 it can be installed natively via apt
-  (`amdrocm-core-sdk7.14-gfx1151` from `repo.amd.com/rocm/packages-multi-arch/ubuntu2604`).
+- **ROCm** : 10.0.0 (`/opt/rocm`). On Ubuntu 26.04 it can be installed natively via apt
+  (`amdrocm-core-sdk10.0-gfx1151` from `stable.repo.amd.com/rocm/core/packages/ubuntu2604`).
   The in-tree amdgpu kernel driver already supports gfx1151, so DKMS / `amdgpu-install` are not needed.
 - **Python** : system 3.14 / each venv is 3.12 (pinned via `.python-version`)
 - **Docker** : 29.x (for VOICEVOX)
@@ -149,6 +149,9 @@ Refer to this URL also:
 https://qiita.com/kotetsu_yama/items/449e0d0527ab3a233fb8
 
 ---
+
+ROCm 10 migration and verification: [docs/ROCM10.md](docs/ROCM10.md). Keep the
+PyTorch/torchaudio 2.8 wheels below; system ROCm and bundled runtimes are independent.
 
 ## 2. Build CTranslate2-ROCm from source
 
@@ -220,7 +223,7 @@ Verify:
 ```bash
 .venv/bin/python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 # → CUDA: True  (ROCm's HIP layer translates the CUDA API)
-.venv/bin/python -c "import ctranslate2; print(ctranslate2.__version__)"
+.venv/bin/python -c "import torch; import ctranslate2; print(ctranslate2.__version__)"
 ```
 
 ---

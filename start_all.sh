@@ -22,7 +22,7 @@ export PULSE_SERVER="${PULSE_SERVER:-unix:${XDG_RUNTIME_DIR}/pulse/native}"
 
 SESSION="aiassistant"
 
-LLAMA_BIN="/home/$USER/llama.cpp/build/bin/llama-server"
+LLAMA_BIN="${LLAMA_BIN:-/home/$USER/llama.cpp/build/bin/llama-server}"
 QWEN_MODEL="/home/$USER/AIassistant/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
 LLAMA_HOST="127.0.0.1"
 LLAMA_PORT="9931"
@@ -50,7 +50,7 @@ unset HSA_OVERRIDE_GFX_VERSION
 export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
 export AMDGPU_TARGETS="${AMDGPU_TARGETS:-gfx1151}"
-export LD_LIBRARY_PATH="/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/usr/local/lib:${ROCM_PATH}/lib:${ROCM_PATH}/lib/llvm/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # ---- helpers ------------------------------------------------------------
 

@@ -58,8 +58,8 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 
 - **OS** : Ubuntu 26.04 (resolute)
 - **GPU** : AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1151、48GB VRAM)
-- **ROCm** : 7.14.0 (`/opt/rocm`)。Ubuntu 26.04 では apt でネイティブ導入できます
-  (`amdrocm-core-sdk7.14-gfx1151` を `repo.amd.com/rocm/packages-multi-arch/ubuntu2604` から)。
+- **ROCm** : 10.0.0 (`/opt/rocm`)。Ubuntu 26.04 では apt でネイティブ導入できます
+  (`amdrocm-core-sdk10.0-gfx1151` を `stable.repo.amd.com/rocm/core/packages/ubuntu2604` から)。
   カーネル同梱 amdgpu が gfx1151 対応済みなので DKMS / `amdgpu-install` は不要。
 - **Python** : system 3.14 / 各 venv は 3.12 (`.python-version` で固定)
 - **Docker** : 29.x (VOICEVOX 用)
@@ -144,6 +144,9 @@ https://qiita.com/kotetsu_yama/items/449e0d0527ab3a233fb8
 
 ---
 
+ROCm 10 の移行・検証は [docs/ROCM10.md](docs/ROCM10.md) を参照してください。
+音声互換性のため、以下の PyTorch / torchaudio 2.8 固定は維持します。
+
 ## 2. CTranslate2-ROCm をソースビルド
 
 `faster-whisper` が呼ぶ CTranslate2 を ROCm/HIP 対応でビルドします。
@@ -208,7 +211,7 @@ uv pip install --reinstall --no-deps pybind11 ~/whisperx/ctranslate2-rocm/python
 ```bash
 .venv/bin/python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 # → CUDA: True  (ROCm の HIP レイヤーが CUDA API を翻訳している)
-.venv/bin/python -c "import ctranslate2; print(ctranslate2.__version__)"
+.venv/bin/python -c "import torch; import ctranslate2; print(ctranslate2.__version__)"
 ```
 
 ---

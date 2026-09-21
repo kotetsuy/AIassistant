@@ -311,9 +311,10 @@ LLM の最初の一文の生成と VOICEVOX 合成が支配的なため。
 - **PyTorch (ROCm) は gfx1151 専用ホイールが必須**。`repo.amd.com/rocm/whl/gfx1151/` の
   `torch==2.8.0+rocm7.12.0` / `torchaudio==2.8.0a0+rocm7.12.0` を使う。汎用の
   `whl-multi-arch` 版は実行時に `hipErrorInvalidImage` (`kpack_load_code_object failed with
-  error: 13`) で **全 GPU 操作が落ちる**。torch はシステム ROCm 7.14 とは別に自前の
-  `rocm-sdk-libraries-gfx1151` (7.12) を同梱するが、CTranslate2 (システム ROCm 7.14) と
-  同一プロセスで共存できる (`LD_LIBRARY_PATH` に `/opt/rocm/lib` が必要)。
+  error: 13`) で **全 GPU 操作が落ちる**。torch はシステム ROCm 10.0 とは別に
+  `rocm-sdk-libraries-gfx1151` (7.12) を同梱する。torch を先に import すると
+  CTranslate2 もロード済みランタイムを利用する。実際のロード先は `ldd` だけでは
+  判定できないため、[ROCm 10 検証手順](docs/ROCM10.md) を参照。
 - **torch は ctranslate2/whisperx より先に import** する必要がある。`whisperx.load_model`
   は `whisperx.asr` 経由で ctranslate2 を先に読み、その中で torch が読まれる。この順序だと
   ctranslate2 がシステム ROCm を先に載せ、torch 同梱の `libhipblaslt.so.1` が rocRoller

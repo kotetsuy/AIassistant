@@ -323,9 +323,9 @@ Details in `docs/STT移植_PHASE3.md`; raw data in `bench/results.json`.
   `torchaudio==2.8.0a0+rocm7.12.0` from `repo.amd.com/rocm/whl/gfx1151/`. The generic
   `whl-multi-arch` build fails at runtime with `hipErrorInvalidImage`
   (`kpack_load_code_object failed with error: 13`) on **every GPU op**. torch bundles its own
-  `rocm-sdk-libraries-gfx1151` (7.12), separate from the system ROCm 7.14, but it coexists in
-  one process with CTranslate2 (which uses the system ROCm 7.14) as long as `LD_LIBRARY_PATH`
-  includes `/opt/rocm/lib`.
+  `rocm-sdk-libraries-gfx1151` (7.12), separate from system ROCm 10.0.
+  Importing torch first lets CTranslate2 reuse the loaded runtime. `ldd` alone does not
+  show the libraries actually loaded; see [ROCm 10 verification](docs/ROCM10.md).
 - **torch must be imported before ctranslate2/whisperx.** `whisperx.load_model` imports
   ctranslate2 first (via `whisperx.asr`), and ctranslate2 imports torch during its own init.
   In that order ctranslate2 loads the system ROCm first, and torch's bundled `libhipblaslt.so.1`

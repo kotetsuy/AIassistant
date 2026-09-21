@@ -30,7 +30,7 @@ and the three-vrm server. torch is pinned to 2.8.x because WhisperX needs
 
 ## Prerequisites
 
-- ROCm 7.x at `/opt/rocm`, gfx1151 GPU
+- ROCm 10.0 at `/opt/rocm`, gfx1151 GPU
 - The `Speech` symlink in `~/AIassistant` pointing at a NeMo Speech checkout on
   the **`rocm-inference`** branch
 - The `whisperX-rocm` symlink, and ctranslate2-rocm built and installed to

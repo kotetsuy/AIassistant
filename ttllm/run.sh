@@ -16,7 +16,7 @@ unset HSA_OVERRIDE_GFX_VERSION
 export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
 # /usr/local/lib はローカルビルドの ctranslate2 (whisperX 用) が参照する。
-export LD_LIBRARY_PATH="/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/usr/local/lib:${ROCM_PATH}/lib:${ROCM_PATH}/lib/llvm/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # STT バックエンド。auto は NeMo を使い、失敗したら whisperX に落ちる。
 export STT_BACKEND="${STT_BACKEND:-auto}"

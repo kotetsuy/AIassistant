@@ -7,16 +7,18 @@ WhisperX（音声認識）と llama.cpp（`llama-server`）を繋ぐ、最小構
 ```
 ttllm/
 ├── server.py    # FastAPI アプリ本体
-├── install.sh   # whisperX-rocm の venv に追加依存をインストール
+├── install.sh   # NeMo + WhisperX の共用 venv を作成
 ├── run.sh       # ROCm 環境変数を設定して uvicorn を起動
 └── READMEJ.md   # このファイル
 ```
 
-WhisperX-ROCm がインストール済みの venv（`~/whisperx/whisperX-rocm/.venv`）を共有して動かすので、torch-ROCm / ctranslate2-rocm を二重に入れる必要はありません。`~/AIassistant/whisperX-rocm` はそこへのシンボリックリンクです。
+NeMo と WhisperX は `ttllm/.venv` に同居します（`TTLLM_VENV` で変更可能）。
+WhisperX 単体の venv とは別です。ROCm 10 の確認は [移行手順](../docs/ROCM10.md) を参照。
 
 ## 前提
 
-- `~/whisperx/whisperX-rocm/.venv` に WhisperX-ROCm 一式（whisperx / torch 2.9+rocm / ctranslate2 / faster-whisper / pyannote.audio）が入っていること
+- システム ROCm 10.0 と gfx1151 GPU。共用 venv は torch 2.8.0+rocm7.12.0 / torchaudio 2.8.0a0+rocm7.12.0 を使用
+- `Speech`（rocm-inference ブランチ）と `whisperX-rocm` のリンク、ビルド済み CTranslate2-ROCm
 - `~/llama.cpp/build/bin/llama-server` がビルド済みであること（MTP 対応のため master 最新を推奨）
 - Qwen3.6 モデル: `~/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf`
 
@@ -27,7 +29,7 @@ cd ~/AIassistant/ttllm
 ./install.sh
 ```
 
-`fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` を whisperX の venv に追加します。
+NeMo / WhisperX とブリッジの依存を共用 venv にインストールします。
 
 ## 起動
 

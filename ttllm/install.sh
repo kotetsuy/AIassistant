@@ -34,6 +34,8 @@ fi
 
 uv venv --python 3.12 "$VENV"
 
+# System ROCm 10 does not require upgrading the bundled ROCm 7.12 wheels.
+# Keep this audio stack pinned; see ../docs/ROCM10.md.
 # torch is pinned to 2.8.x because whisperX requires <2.9 (pyannote uses
 # torchaudio.info / AudioMetaData, removed in torchaudio 2.9). NeMo only needs
 # >=2.6, and Phase 0 measured it as no slower there than on 2.9.1.
