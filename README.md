@@ -280,7 +280,7 @@ ls -lh ~/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 ```
 
 > Only about 3B active parameters are used per token, so it is fast despite the 34.66B total
-> (tg128 ≈ 50 t/s on the Ryzen AI 9 HX 370). See `qwen3.6/READMEJ.md` for detailed benchmarks.
+> (reference: tg128 ≈ 50 t/s on the Ryzen AI Max+ 395, not an HX 370 measurement). See `qwen3.6/READMEJ.md` for detailed benchmarks.
 
 ---
 

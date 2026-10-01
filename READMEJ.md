@@ -27,6 +27,43 @@ Ubuntu + AMD Ryzen AI 9 HX 370 (ROCm) 上で、**音声 → STT → LLM → TTS 
 > 既知の制約、トラブルシュート）は [`TECHNICALJ.md`](./TECHNICALJ.md) にまとめています。**
 > こちらは「git clone から `./start_all.sh` でコテコが喋るまで」の手順書です。
 
+## HX 370 / gfx1150 のこのPCでの起動
+
+2026-10-01 に Ubuntu 26.04.1 / ROCm 10 / Radeon 890M でセットアップ・実推論を確認。
+`main` をこの `hx370-gfx1150` ブランチへマージし、GPU専用wheelは gfx1150 を使用しています。
+Git署名はこのリポジトリだけ `kotetsuy <17156627+kotetsuy@users.noreply.github.com>` に設定。
+
+```bash
+cd ~/AIassistant
+./start_all.sh
+# http://localhost:8000/zundamon.html
+# 停止: ./stop_all.sh
+```
+
+ローカル配置:
+
+- `ttllm/.venv`: Python 3.12、torch 2.8.0+rocm7.12.0、NeMo / WhisperX 共用。
+- `qwen3.6/`: Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf。既存 `~/llama.cpp` の gfx1150 ビルドを使用。
+- `Speech -> ../Speech` (`rocm-inference`)、`whisperX-rocm -> ../whisperx/whisperX-rocm`。
+- `vroid -> vrm`: ユーザー提供の `vrm/koteko.vrm`。モデル本体はGit対象外。
+- `.local/lib`: ROCm 10でビルドしたCTranslate2 4.6.2。`start_all.sh` / `ttllm/run.sh` がライブラリパスを設定。
+- `.local/usr/lib/x86_64-linux-gnu`: UbuntuのPortAudioパッケージを展開。`vtt/run.sh` が参照。
+
+CTranslate2フォークの引数末尾カンマによるビルドエラーは
+[`docs/patches/ctranslate2-rocm-trailing-comma.patch`](docs/patches/ctranslate2-rocm-trailing-comma.patch)
+で修正済みです。新規取得時は依存リポジトリへこのパッチを適用し、上記手順のCMakeに
+`-DCMAKE_INSTALL_PREFIX="$HOME/AIassistant/.local"` を追加して、
+`cmake --install build` でローカル導入してください。依存リポジトリ側の修正は未コミットです。
+
+`ttllm/install.sh` はvenvを再利用し、WhisperXのCUDA用uv設定を無効化してAMD用wheelを選択します。
+AMD版torchaudioの `2.8.0a0` 表記は `ttllm/rocm-overrides.txt` で明示しています。
+NeMo / WhisperX / Silero VADを事前キャッシュし、通常起動はオフライン設定です。
+
+検証記録は `logs/setup-verification.json`、GPU確認は `logs/torch-gpu-check.log`、
+WhisperX単体の日本語認識結果は `logs/whisper-fallback-check.log` にあります。
+ブラウザでのマイク許可と、実際のスピーカー音声・描画の目視確認はユーザー操作が必要です。
+本文の旧ベンチマーク値は元のMax+ 395環境の参考値で、HX 370の測定値ではありません。
+
 ## 構成
 
 | パス | 役割 | ポート |
@@ -268,7 +305,7 @@ ls -lh ~/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 ```
 
 > アクティブパラメータは 1 トークンあたり約 3B 相当なので、総 34.66B の割に高速です
-> (Ryzen AI 9 HX 370 で tg128 ≈ 50 t/s)。詳細なベンチは `qwen3.6/READMEJ.md` を参照。
+> (参考: Ryzen AI Max+ 395 で tg128 ≈ 50 t/s。HX 370 の実測値ではありません)。詳細なベンチは `qwen3.6/READMEJ.md` を参照。
 
 ---
 

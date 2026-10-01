@@ -11,6 +11,7 @@ set -euo pipefail
 AIASSISTANT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 VENV="${TTLLM_VENV:-$AIASSISTANT/ttllm/.venv}"
 CT2_SRC="${CTRANSLATE2_SRC:-/home/$USER/whisperx/ctranslate2-rocm/python}"
+CT2_ROOT="${CTRANSLATE2_ROOT:-$AIASSISTANT/.local}"
 
 command -v uv >/dev/null 2>&1 || { echo "uv not found; see https://docs.astral.sh/uv/" >&2; exit 1; }
 
@@ -32,7 +33,9 @@ if [[ "$branch" != "rocm-inference" ]]; then
     echo "         The ROCm fix lives only on that branch; NeMo will fail to load." >&2
 fi
 
-uv venv --python 3.12 "$VENV"
+if [[ ! -x "$VENV/bin/python" ]]; then
+    uv venv --python 3.12 "$VENV"
+fi
 
 # System ROCm 10 does not require upgrading the bundled ROCm 7.12 wheels.
 # Keep this audio stack pinned; see ../docs/ROCM10.md.
@@ -44,7 +47,8 @@ uv venv --python 3.12 "$VENV"
 VIRTUAL_ENV="$VENV" uv pip install \
     --index-url https://repo.amd.com/rocm/whl/gfx1150/ \
     --extra-index-url https://pypi.org/simple \
-    --index-strategy unsafe-best-match --prerelease allow \
+    --index-strategy unsafe-best-match --prerelease allow --no-sources \
+    --override "$AIASSISTANT/ttllm/rocm-overrides.txt" \
     "torch==2.8.0+rocm7.12.0" "torchaudio==2.8.0a0+rocm7.12.0" \
     -e "$AIASSISTANT/whisperX-rocm" \
     -e "$AIASSISTANT/Speech[asr]" \
@@ -58,7 +62,7 @@ VIRTUAL_ENV="$VENV" uv pip install \
 # The resolver above picks up the PyPI ctranslate2, which is a CUDA build.
 # Overwrite it with the locally built ROCm one.
 if [[ -d "$CT2_SRC" ]]; then
-    CTRANSLATE2_ROOT=/usr/local VIRTUAL_ENV="$VENV" \
+    CTRANSLATE2_ROOT="$CT2_ROOT" VIRTUAL_ENV="$VENV" \
         uv pip install --reinstall --no-deps pybind11 "$CT2_SRC"
 else
     echo "WARNING: ctranslate2-rocm source not found at $CT2_SRC" >&2
@@ -70,6 +74,13 @@ fi
 echo "Caching the NeMo ASR model..."
 "$VENV/bin/hf" download nvidia/nemotron-3.5-asr-streaming-0.6b \
     nemotron-3.5-asr-streaming-0.6b.nemo >/dev/null
+
+# run.sh is offline by default; cache the fallback and its VAD as well.
+"$VENV/bin/hf" download mobiuslabsgmbh/faster-whisper-large-v3-turbo >/dev/null
+"$VENV/bin/python" - <<'PYVAD'
+import torch
+torch.hub.load("snakers4/silero-vad", "silero_vad", trust_repo=True)
+PYVAD
 
 echo
 echo "Shared venv ready: $VENV"
