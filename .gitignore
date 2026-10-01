@@ -62,6 +62,7 @@ whisperX-rocm/
 /ctranslate2-rocm
 /llama.cpp
 /qwen3.6
+/qwen3.8
 
 # ================================
 # ランタイム出力 / キャプチャ
@@ -103,3 +104,7 @@ build/
 # ================================
 vroid
 
+
+# 評価用音声。肉声の録音と FLEURS データセットの音声を含むため公開しない。
+# bench/bench_stt.py の再現手順は docs/STT移植_PHASE3.md を参照。
+bench/audio/

@@ -18,7 +18,7 @@ vtt/
 ```
 
 `ttllm` の `/transcribe` に WAV を POST する薄いクライアントです。
-WhisperX / torch-ROCm / ctranslate2-rocm は ttllm 側（`~/AIzunda/whisperX-rocm`、`~/AIassistant/whisperX-rocm` 経由でアクセス可）が
+STT のモデルと ROCm 依存は ttllm 側の共用 venv（`~/AIassistant/ttllm/.venv`）が
 抱えているので、vtt 本体では `numpy` / `sounddevice` / `soundfile` / `httpx` だけ入ります。
 
 ## 動作確認済みの構成
@@ -28,7 +28,7 @@ WhisperX / torch-ROCm / ctranslate2-rocm は ttllm 側（`~/AIzunda/whisperX-roc
 | OS | Ubuntu 24.04.4 LTS (PipeWire) |
 | 入力デバイス | USB Composite Device (YunChen, card 1, 48kHz mono) |
 | ttllm 先 | `http://localhost:8001`（`~/AIassistant/ttllm/run.sh`） |
-| WhisperX venv | `~/AIzunda/whisperX-rocm/.venv`（torch 2.9.1+rocm7.2.0 / ctranslate2 4.6.2 / faster-whisper 1.2.1） |
+| ttllm 共用 venv | `~/AIassistant/ttllm/.venv`（torch 2.8.0+rocm7.12.0 / nemo-toolkit / ctranslate2 4.6.2 / faster-whisper 1.2.1） |
 | モデル | `large-v3-turbo`（ttllm 側で環境変数指定） |
 
 起こったハマりポイント：
@@ -42,8 +42,9 @@ WhisperX / torch-ROCm / ctranslate2-rocm は ttllm 側（`~/AIzunda/whisperX-roc
   ```bash
   cd ~/AIassistant/ttllm && ./run.sh
   ```
-- `~/AIzunda/whisperX-rocm` に whisperx が入っており、ttllm の `WHISPERX_VENV`
-  が`~/AIzunda/whisperX-rocm/.venv`を指していること（ttllm の `READMEJ.md` 参照）
+- ttllm の共用 venv が `~/AIassistant/ttllm/.venv` にあること
+  （`ttllm/install.sh` が作る。`TTLLM_VENV` で上書き可）。
+  vtt は ttllm と HTTP で話すだけなので、STT バックエンドがどちらでも影響を受けません
 - `libportaudio2` が入っていること
   ```bash
   sudo apt-get install -y libportaudio2

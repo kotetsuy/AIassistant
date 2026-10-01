@@ -497,6 +497,181 @@ async def voice_chat_speak_stream_handler(request: web.Request) -> web.Response:
     })
 
 
+async def stt_chat_stream_handler(request: web.Request) -> web.WebSocketResponse:
+    """ストリーミング STT 版の会話経路。
+
+    ブラウザ (WS, float32 PCM 16kHz mono)
+      → ttllm /transcribe_stream (WS)          … 発話中から部分転写
+      → 確定したら ttllm /chat_stream (SSE)     … LLM
+      → 文単位で VOICEVOX → 既存の WS ブロードキャスト
+
+    一括経路 (/voice_chat_speak_stream) はそのまま残してあり、ブラウザ側が
+    どちらを使うかを選ぶ。ttllm 側が streaming 非対応 (whisperX 稼働中など) の
+    場合は type=error, fallback=batch を返すので、ブラウザは一括経路に倒す。
+    """
+    ws = web.WebSocketResponse(heartbeat=30)
+    await ws.prepare(request)
+
+    speaker_id = int(request.query.get("speaker_id", "3"))
+    turn_id = uuid.uuid4().hex
+    transcript = ""
+
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=TTLLM_TIMEOUT)
+        ) as session:
+            async with session.ws_connect(f"{TTLLM_URL}/transcribe_stream") as up:
+                transcript = await _relay_stt(ws, up, turn_id)
+
+            if transcript is None:          # streaming unsupported upstream
+                await ws.send_json({"type": "error", "error": "streaming unsupported",
+                                    "fallback": "batch"})
+                return ws
+            if not transcript:
+                await ws.send_json({"type": "done", "transcript": "", "reply": "", "chunks": 0})
+                return ws
+
+            await ws.send_json({"type": "final", "text": transcript})
+            await _broadcast({"type": "turn_start", "turn_id": turn_id})
+            reply, chunks = await _llm_to_speech(session, transcript, speaker_id, turn_id)
+
+        await _broadcast({"type": "turn_end", "turn_id": turn_id, "chunks": chunks})
+        await ws.send_json({"type": "done", "transcript": transcript,
+                            "reply": reply, "chunks": chunks, "turn_id": turn_id})
+    except aiohttp.ClientError as e:
+        await _broadcast({"type": "turn_end", "turn_id": turn_id})
+        if not ws.closed:
+            await ws.send_json({"type": "error", "error": f"ttllm unreachable: {e}",
+                                "fallback": "batch"})
+    return ws
+
+
+async def _relay_stt(down: web.WebSocketResponse, up, turn_id: str):
+    """ブラウザ ↔ ttllm の PCM / 転写中継。確定転写を返す (非対応なら None)。
+
+    上流の読み出しは専用タスクにする。PCM 送信ループの合間にポーリングする形だと
+    部分転写が溜まってしまい、発話終了時にまとめて届いて字幕がライブにならない。
+    """
+    result: asyncio.Future = asyncio.get_running_loop().create_future()
+
+    async def pump_up():
+        async for reply in up:
+            if reply.type != aiohttp.WSMsgType.TEXT:
+                continue
+            data = json.loads(reply.data)
+            kind = data.get("type")
+            if kind == "partial":
+                if not down.closed:
+                    await down.send_json(data)
+                await _broadcast({"type": "transcript", "turn_id": turn_id,
+                                  "text": data.get("text", ""), "partial": True})
+            elif kind == "final":
+                if not result.done():
+                    result.set_result(data.get("text", "") or "")
+                return
+            elif kind == "error":
+                if not result.done():
+                    result.set_result(None)
+                return
+        if not result.done():
+            result.set_result("")
+
+    pump = asyncio.create_task(pump_up())
+    try:
+        async for msg in down:
+            if msg.type == aiohttp.WSMsgType.BINARY:
+                if result.done():      # upstream already gave up
+                    break
+                await up.send_bytes(msg.data)
+            elif msg.type == aiohttp.WSMsgType.TEXT:
+                if json.loads(msg.data).get("type") != "end":
+                    continue
+                await up.send_str(json.dumps({"type": "end"}))
+                return await result
+            elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR):
+                break
+        return await result if result.done() else ""
+    finally:
+        pump.cancel()
+
+
+async def _llm_to_speech(session, transcript: str, speaker_id: int, turn_id: str):
+    """ttllm /chat_stream のトークンを文に切って VOICEVOX → WS へ流す。
+
+    /voice_chat_speak_stream の後半と同じ処理だが、入力が音声ではなく確定転写。
+    """
+    sentence_q: asyncio.Queue[str | None] = asyncio.Queue()
+    chunks_sent = 0
+    reply_accum = ""
+
+    async def tts_consumer():
+        nonlocal chunks_sent
+        async with aiohttp.ClientSession() as tts_session:
+            while True:
+                sentence = await sentence_q.get()
+                if sentence is None:
+                    return
+                try:
+                    wav, visemes, vtimes, vdurations = await _synth_chunk(
+                        tts_session, sentence, speaker_id
+                    )
+                except web.HTTPBadGateway as e:
+                    await _broadcast({"type": "error", "turn_id": turn_id, "error": e.reason})
+                    continue
+                await _broadcast({
+                    "type": "speak",
+                    "turn_id": turn_id,
+                    "seq": chunks_sent,
+                    "audio": base64.b64encode(wav).decode("ascii"),
+                    "visemes": visemes,
+                    "vtimes": vtimes,
+                    "vdurations": vdurations,
+                    "text": sentence,
+                })
+                chunks_sent += 1
+
+    consumer_task = asyncio.create_task(tts_consumer())
+    buf = ""
+
+    async with session.post(f"{TTLLM_URL}/chat_stream", json={"text": transcript}) as resp:
+        if resp.status != 200:
+            await sentence_q.put(None)
+            await consumer_task
+            raise aiohttp.ClientError(f"/chat_stream failed ({resp.status})")
+        async for raw in resp.content:
+            line = raw.decode("utf-8", errors="ignore").rstrip("\r\n")
+            if not line.startswith("data:"):
+                continue
+            data = line[len("data:"):].strip()
+            if not data:
+                continue
+            try:
+                msg = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            t = msg.get("type")
+            if t == "token":
+                buf += msg.get("text", "") or ""
+                sentences, buf = _split_sentences(buf, flush=False)
+                for s in sentences:
+                    reply_accum += s
+                    await sentence_q.put(s)
+            elif t == "error":
+                await _broadcast({"type": "error", "turn_id": turn_id,
+                                  "error": msg.get("error", "")})
+            elif t == "done":
+                if msg.get("reply"):
+                    reply_accum = msg["reply"]
+                break
+
+    tail, _ = _split_sentences(buf, flush=True)
+    for s in tail:
+        await sentence_q.put(s)
+    await sentence_q.put(None)
+    await consumer_task
+    return reply_accum, chunks_sent
+
+
 async def vrm_handler(request: web.Request) -> web.Response:
     filename = os.path.basename(request.match_info["filename"])
     filepath = os.path.join(VRM_DIR, filename)
@@ -534,6 +709,7 @@ def create_app() -> web.Application:
     app.router.add_post("/speak", speak_handler)
     app.router.add_post("/voice_chat_speak", voice_chat_speak_handler)
     app.router.add_post("/voice_chat_speak_stream", voice_chat_speak_stream_handler)
+    app.router.add_get("/stt_chat_stream", stt_chat_stream_handler)
     app.router.add_get("/vrm/{filename}", vrm_handler)
     app.router.add_get("/images_list", images_list_handler)
     app.router.add_get("/status", status_handler)

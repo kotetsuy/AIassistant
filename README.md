@@ -3,7 +3,7 @@
 > Voice: VOICEVOX:Zundamon
 
 A fully local stack that runs **Voice → STT → LLM → TTS → VRM Lip Sync** end-to-end
-on Ubuntu + AMD Ryzen AI Max+ 395 (ROCm). Press the 🎤 button in your browser and
+on Ubuntu + AMD Ryzen AI 9 HX 370 (ROCm). Press the 🎤 button in your browser and
 Koteko replies in her own voice.
 
 <img width="1219" height="1140" alt="https---qiita-image-store s3 ap-northeast-1 amazonaws com-0-263486-86fd1211-a196-4c6d-bf7b-e4ff53d8c5ba" src="https://github.com/user-attachments/assets/4292a4f1-5239-4a83-8c9e-3c3d4610fed2" />
@@ -16,8 +16,8 @@ Browser (three-vrm)
     three-vrm server (port 8000)
          ↓ POST /voice_chat_stream
        ttllm bridge (port 8001)
-         ├─ WhisperX-ROCm (STT, large-v3-turbo)
-         └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+         ├─ STT: NeMo Speech (default) or WhisperX-ROCm (fallback)
+         └─ llama-server (Qwen3.6-35B-A3B MoE, port 9931)
          ↓ Token stream over SSE
     three-vrm: split at sentence boundaries → VOICEVOX (port 50021) → push over WS
          ↓ WS (audio + visemes)
@@ -34,27 +34,76 @@ Browser (three-vrm)
 | Path | Role | Port |
 |---|---|---|
 | `voicevox/` | VOICEVOX Engine (Docker, CPU inference) | 50021 |
-| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 inference (MoE, ~3B active) | 8080 |
+| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 inference (MoE, ~3B active) | 9931 |
 | `qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | LLM model (MoE, ~21GB) | — |
 | `qwen3.6/mmproj-F16.gguf` | Vision encoder (optional, for multimodal) | — |
-| `ttllm/` | FastAPI bridge (WhisperX + llama.cpp) | 8001 |
+| `ttllm/` | FastAPI bridge (STT + llama.cpp), shared venv at `ttllm/.venv` | 8001 |
+| `ttllm/stt/` | STT backends: `nemo.py` (default), `whisperx.py` (fallback), `streaming.py` | — |
 | `three-vrm/` | aiohttp server + VRM viewer (HTML/three-vrm) | 8000 |
 | `vtt/` | CLI PTT mic (optional) | — |
+| `bench/` | STT latency / accuracy benchmarks (see `docs/STT移植_PHASE3.md`) | — |
 | `images/` | VRM viewer backgrounds (rotated every 5 minutes) | — |
 | `vroid/koteko.vrm` | Koteko VRM 1.0 model | — |
-| `whisperX-rocm/` | ROCm fork of WhisperX (symlink to `~/AIzunda/whisperX-rocm`) | — |
+| `Speech/` | NeMo Speech, ROCm branch (symlink to `~/Speech`, branch `rocm-inference`) | — |
+| `whisperX-rocm/` | ROCm fork of WhisperX (symlink to `~/whisperx/whisperX-rocm`) | — |
 
 > :pencil: The current default LLM is **Qwen3.6-35B-A3B (MoE)**. We previously used a dense
 > Qwen3.6-27B with MTP speculative decoding, but switched because the MoE model is faster on
 > bandwidth-limited iGPUs. See [`TECHNICAL.md`](./TECHNICAL.md) for the rationale and
 > measurements.
+>
+> **Qwen3.8-27B was evaluated on 2026-08-16 and deferred.** It is dense, not MoE, so it runs
+> at 11 tok/s here and pushes time-to-first-audio over a second in 14 of 30 runs (the MoE:
+> 0 of 30). We will revisit it when a MoE build in this size class ships. Numbers are in
+> [`TECHNICAL.md`](./TECHNICAL.md).
+
+## STT backends
+
+Speech recognition runs on **NeMo Speech** (`nvidia/nemotron-3.5-asr-streaming-0.6b`) by
+default, with **WhisperX-ROCm** kept as a runtime fallback. Both live in the same venv, so
+if NeMo fails to load or throws mid-request, the bridge switches over and keeps answering —
+loudly, at WARNING level and in `/health`, because a silent switch to a different model is
+the worst outcome.
+
+| `STT_BACKEND` | Behaviour |
+|---|---|
+| `auto` (default) | NeMo, falling back to WhisperX on failure |
+| `nemo` | NeMo only; a failure is a failure |
+| `whisperx` | WhisperX only (the pre-migration behaviour) |
+
+```bash
+STT_BACKEND=whisperx ./ttllm/run.sh     # force the old backend
+curl -s localhost:8001/health | jq .stt # which one is actually serving
+```
+
+On short conversational utterances both backends transcribe identically, and NeMo is 2-3x
+faster. WhisperX is more accurate on long, proper-noun-heavy speech. Numbers are in
+[`docs/STT移植_PHASE3.md`](./docs/STT移植_PHASE3.md).
+
+### Streaming STT (opt-in)
+
+NeMo also supports cache-aware streaming: the browser sends raw PCM over a WebSocket while
+you are still speaking, so the transcript is finalised **50-100ms after you stop, regardless
+of how long you spoke** (the one-shot path takes 250-550ms and grows with utterance length).
+
+It is **off by default**. Enable it per-session with `?stt=stream` on the viewer URL, or
+persist it with `localStorage.sttStreaming = "1"`:
+
+```
+http://localhost:8000/zundamon.html?stt=stream
+```
+
+The one-shot path is untouched and still used whenever streaming is off or unavailable
+(e.g. while the WhisperX backend is active).
 
 ### Prerequisites
 
-- **OS** : Ubuntu 24.04.4 LTS
-- **GPU** : AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1150, 48GB VRAM)
-- **ROCm** : 7.2.1 (`/opt/rocm`)
-- **Python** : 3.12.3
+- **OS** : Ubuntu 26.04 (resolute)
+- **GPU** : AMD Ryzen AI 9 HX 370 / Radeon 890M (gfx1150, ~29GB shared GPU memory)
+- **ROCm** : 10.0.0 (`/opt/rocm`). On Ubuntu 26.04 it can be installed natively via apt
+  (`amdrocm-core-sdk10.0-gfx1150` from `stable.repo.amd.com/rocm/core/packages/ubuntu2604`).
+  The in-tree amdgpu kernel driver already supports gfx1150, so DKMS / `amdgpu-install` are not needed.
+- **Python** : system 3.14 / each venv is 3.12 (pinned via `.python-version`)
 - **Docker** : 29.x (for VOICEVOX)
 - **Browser** : Google Chrome (Firefox also works since it uses `AudioContext`)
 - **tmux / curl / uv / huggingface_hub (hf CLI)** : used by the startup script
@@ -67,16 +116,21 @@ For detailed setup, refer to the `READMEJ.md` in each subdirectory:
 
 ## 1. Fetch the repository and dependencies
 
-The main repository references `whisperX-rocm` / `llama.cpp` / `qwen3.6` via symlinks,
-so first place the main repo and its dependencies **directly under your home directory**.
+The main repository references `whisperX-rocm` / `Speech` / `llama.cpp` / `qwen3.6` via
+symlinks, so first place the main repo and its dependencies **directly under your home
+directory**.
 
 ```bash
 cd ~
 git clone https://github.com/kotetsuy/AIassistant.git
 git clone https://github.com/ggml-org/llama.cpp.git
+
+# NeMo Speech — the default STT backend. The rocm-inference branch carries the
+# ROCm fix; without it the model will not load on an AMD GPU.
+git clone -b rocm-inference https://github.com/kotetsuy/Speech.git
 ```
 
-You also need the ROCm forks of WhisperX and CTranslate2:
+You also need the ROCm forks of WhisperX and CTranslate2, which back the fallback STT:
 
 ```bash
 mkdir -p ~/whisperx && cd ~/whisperx
@@ -84,15 +138,20 @@ git clone https://github.com/<your_whisperx_rocm_fork>/whisperX-rocm.git
 git clone https://github.com/<your_ctranslate2_rocm_fork>/ctranslate2-rocm.git
 ```
 
-> :pencil: On the actual machine, `whisperX-rocm` is placed at `~/AIzunda/whisperX-rocm`,
-> but for a fresh setup `~/whisperx/whisperX-rocm` works just as well. The `whisperX-rocm`
-> entry inside AIassistant is a **symlink**, so re-point it to match your environment.
+> :pencil: `whisperX-rocm` is placed at `~/whisperx/whisperX-rocm` (the `whisperX-rocm` entry
+> inside AIassistant is a symlink to it). ttllm's `run.sh` / `install.sh` default to this path
+> as well. It previously lived at `~/AIzunda/whisperX-rocm`, but after the OS upgrade
+> (Ubuntu 26.04 / system python 3.14) the old venv's interpreter broke, so we consolidated on
+> `~/whisperx`. To change the target, update `ln -sfn <path> whisperX-rocm`.
 
 Refer to this URL also:
 
 https://qiita.com/kotetsu_yama/items/449e0d0527ab3a233fb8
 
 ---
+
+ROCm 10 migration and verification: [docs/ROCM10.md](docs/ROCM10.md). Keep the
+PyTorch/torchaudio 2.8 wheels below; system ROCm and bundled runtimes are independent.
 
 ## 2. Build CTranslate2-ROCm from source
 
@@ -102,41 +161,69 @@ Build the CTranslate2 backend that `faster-whisper` calls, with ROCm/HIP support
 cd ~/whisperx/ctranslate2-rocm
 mkdir -p build && cd build
 
-export HSA_OVERRIDE_GFX_VERSION=11.5.0
 export AMDGPU_TARGETS=gfx1150
 
 cmake .. -DWITH_HIP=ON -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
   -DCMAKE_HIP_ARCHITECTURES=gfx1150 -DCMAKE_BUILD_TYPE=Release \
-  -DOPENMP_RUNTIME=COMP \
+  -DOPENMP_RUNTIME=COMP -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_C_COMPILER=/opt/rocm/lib/llvm/bin/clang \
   -DCMAKE_PREFIX_PATH=/opt/rocm -DBUILD_CLI=OFF
-make -j$(nproc) && sudo make install
+make -j$(nproc) && sudo make install && sudo ldconfig
 ```
 
 If `/usr/local/lib/libctranslate2.so` is installed, the build succeeded.
 
+> :warning: With CMake 4.x the bundled `third_party/cpu_features` declares a
+> `cmake_minimum_required` that is too old and configure fails. The
+> `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` above is required.
+
 ---
 
-## 3. Create a venv for WhisperX-ROCm
+## 3. Create the standalone WhisperX-ROCm venv (optional)
+
+> :pencil: This venv is only for using the whisperX CLI on its own. The pipeline itself
+> uses the shared `ttllm/.venv` built in step 7, which contains both STT backends. Skip this
+> if you never run whisperX standalone.
+
 
 ```bash
 cd ~/whisperx/whisperX-rocm
-uv venv && uv pip install -e .
+uv venv && uv pip install -e .   # venv is 3.12 via .python-version
+
+# `uv pip install -e .` pulls the NVIDIA CUDA build of torch by default, so
+# replace it with the gfx1150-specific ROCm wheels (see the warning below)
+uv pip uninstall torch torchaudio
+uv pip install \
+  --index-url https://repo.amd.com/rocm/whl/gfx1150/ \
+  --extra-index-url https://pypi.org/simple \
+  --index-strategy unsafe-best-match --prerelease allow \
+  torch==2.8.0+rocm7.12.0 torchaudio==2.8.0a0+rocm7.12.0
 
 # Reinstall the Python bindings of the ROCm build of ctranslate2
 rm -rf .venv/lib/python3.12/site-packages/ctranslate2*
 export CTRANSLATE2_ROOT=/usr/local
-uv pip install --reinstall pybind11 ~/whisperx/ctranslate2-rocm/python
+uv pip install --reinstall --no-deps pybind11 ~/whisperx/ctranslate2-rocm/python
 ```
+
+> :warning: **Use the gfx1150-specific index for PyTorch (ROCm).** The generic
+> `whl-multi-arch` build fails at runtime with `hipErrorInvalidImage`
+> (`kpack_load_code_object failed`) on every GPU op. Also pin **torchaudio to < 2.9**
+> (pyannote uses `torchaudio.info` / `AudioMetaData`, removed in 2.9). These wheels have no
+> cp310, so the venv must be Python 3.11+.
+
+> :warning: **Do not set `HSA_OVERRIDE_GFX_VERSION`.** Everything here (the gfx1150
+> PyTorch wheels, CTranslate2-ROCm, llama.cpp) is built natively for gfx1150, so
+> overriding the arch breaks it. `start_all.sh` and `ttllm/run.sh` explicitly `unset`
+> it in case it is exported from your shell profile.
 
 Verify:
 
 ```bash
 .venv/bin/python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 # → CUDA: True  (ROCm's HIP layer translates the CUDA API)
-.venv/bin/python -c "import ctranslate2; print(ctranslate2.__version__)"
+.venv/bin/python -c "import torch; import ctranslate2; print(ctranslate2.__version__)"
 ```
 
 ---
@@ -151,7 +238,6 @@ cd ~/llama.cpp
 git pull --ff-only origin master
 
 mkdir -p build && cd build
-export HSA_OVERRIDE_GFX_VERSION=11.5.0
 export AMDGPU_TARGETS=gfx1150
 
 cmake .. -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1150 \
@@ -194,37 +280,72 @@ ls -lh ~/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 ```
 
 > Only about 3B active parameters are used per token, so it is fast despite the 34.66B total
-> (tg128 ≈ 50 t/s on the Ryzen AI Max+ 395). See `qwen3.6/READMEJ.md` for detailed benchmarks.
+> (tg128 ≈ 50 t/s on the Ryzen AI 9 HX 370). See `qwen3.6/READMEJ.md` for detailed benchmarks.
 
 ---
 
 ## 6. Create the symlinks inside AIassistant
 
-Make `llama.cpp` / `whisperX-rocm` / `qwen3.6` reachable from `~/AIassistant` via relative paths.
+Make `llama.cpp` / `whisperX-rocm` / `Speech` / `qwen3.6` reachable from `~/AIassistant` via
+relative paths. Everything under AIassistant references these through the symlinks, never
+through absolute home paths.
 
 ```bash
 cd ~/AIassistant
 ln -sf ../llama.cpp llama.cpp
 ln -sf ../whisperx/whisperX-rocm whisperX-rocm
+ln -sf ../Speech Speech
 ln -sf ../qwen3.6 qwen3.6
 
 ls -la
 # llama.cpp -> ../llama.cpp
 # qwen3.6 -> ../qwen3.6
+# Speech -> ../Speech
 # whisperX-rocm -> ../whisperx/whisperX-rocm
+```
+
+`Speech` must be on the **`rocm-inference`** branch — the ROCm fix for NeMo lives only
+there, and without it the model fails to load. `start_all.sh` checks the symlink exists and
+`ttllm/install.sh` warns about the branch.
+
+```bash
+git -C ~/Speech branch --show-current   # rocm-inference
 ```
 
 ---
 
-## 7. Add ttllm bridge dependencies to the venv
+## 7. Build the shared venv
 
 ```bash
 cd ~/AIassistant/ttllm
 ./install.sh
 ```
 
-This **adds `fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` to the
-WhisperX-ROCm venv** (no dedicated venv is created — the venv is shared).
+This creates **`ttllm/.venv`**, which hosts *both* STT backends plus the bridge and the
+three-vrm server:
+
+- `torch==2.8.0+rocm7.12.0` from the gfx1150 wheel index (pinned to 2.8.x because WhisperX
+  needs `torchaudio<2.9`; NeMo only needs `>=2.6`)
+- `whisperx` and the locally built ROCm `ctranslate2`
+- `nemo-toolkit[asr]` via the `Speech` symlink
+- `fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` / `aiohttp`
+
+It also pre-caches the NeMo model, which matters because `run.sh` starts with
+`HF_HUB_OFFLINE=1`.
+
+Override the location with `TTLLM_VENV` if needed. The standalone WhisperX venv at
+`~/whisperx/whisperX-rocm/.venv` is left alone — this is a separate, additional venv.
+
+> :pencil: **three-vrm also runs with the same venv's python.** System python (3.14 on Ubuntu
+> 26.04) has no `aiohttp`, so `start_all.sh` launches three-vrm as
+> `$TTLLM_VENV/bin/python server.py`. `install.sh` already puts `aiohttp` in there; if you
+> built the venv some other way:
+>
+> ```bash
+> VIRTUAL_ENV=~/AIassistant/ttllm/.venv uv pip install aiohttp
+> ```
+>
+> When starting it by hand, use the venv python rather than `python3 server.py`.
 
 ---
 
@@ -275,9 +396,9 @@ cd ~/AIassistant
 The following services come up serially, with HTTP health checks gating each step:
 
 1. VOICEVOX (Docker, port 50021)
-2. llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+2. llama-server (Qwen3.6-35B-A3B MoE, port 9931)
 3. ttllm bridge (port 8001)
-4. WhisperX warmup (POSTs to `/warmup` to finish the first model load up front)
+4. STT warmup (POSTs to `/warmup` to load the model and run one throwaway inference)
 5. three-vrm server (port 8000)
 6. Chrome auto-opens `http://localhost:8000/zundamon.html`
 7. vtt (CLI PTT, optional)
@@ -307,7 +428,7 @@ If the first audio comes back in roughly 1 second, you're good.
 ## Start / stop everything
 
 ```bash
-~/AIassistant/start_all.sh   # full stack startup + health check + WhisperX warmup + Chrome open
+~/AIassistant/start_all.sh   # full stack startup + health check + STT warmup + Chrome open
 ~/AIassistant/stop_all.sh    # stop the tmux session and VOICEVOX
 ~/AIassistant/stop_all.sh --keep-voicevox   # leave the VOICEVOX container running
 ```
@@ -317,7 +438,7 @@ If the first audio comes back in roughly 1 second, you're good.
 | window | command |
 |---|---|
 | 0 voicevox | `docker logs -f voicevox_engine` |
-| 1 llama | `llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --port 8080 -ngl 99 -c 8192 -fit off` |
+| 1 llama | `llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --port 9931 -ngl 99 -c 8192 -fit off` |
 | 2 ttllm | `ttllm/run.sh` (uvicorn) |
 | 3 three-vrm | `python3 three-vrm/server.py` |
 | 4 vtt | `vtt/run.sh --device USB` (CLI PTT, optional) |
@@ -327,8 +448,10 @@ Stop everything: `~/AIassistant/stop_all.sh`
 
 The startup order is serialized to follow the dependency graph, with HTTP health-check
 waits at each stage (only the llama-server model load has a generous 600-second timeout).
-Right after ttllm comes up, `/warmup` is called to preload the WhisperX model, so the
-very first utterance isn't slow.
+Right after ttllm comes up, `/warmup` is called to load the STT model *and* run one
+throwaway inference, so the very first utterance isn't slow. Loading alone is not enough for
+NeMo: without the warmup pass the first request pays ~2.8s of kernel compilation.
+The whole warmup takes about 33s (NeMo load 25s + warmup pass 3s + WhisperX preload 1s).
 
 ## Using the browser UI
 

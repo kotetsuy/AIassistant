@@ -13,8 +13,8 @@ Browser (three-vrm)
     three-vrm server (port 8000)
          ↓ POST /voice_chat_stream
        ttllm bridge (port 8001)
-         ├─ WhisperX-ROCm (STT, large-v3-turbo)
-         └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+         ├─ STT: NeMo Speech (default) / WhisperX-ROCm (fallback)
+         └─ llama-server (Qwen3.6-35B-A3B MoE, port 9931)
          ↓ Token stream over SSE
     three-vrm: split at sentence boundaries → VOICEVOX (port 50021) → push over WS
          ↓ WS (audio + visemes)
@@ -126,6 +126,44 @@ python3 gguf-py/gguf/scripts/gguf_dump.py --no-tensors \
 MTP support was merged in llama.cpp PR
 [#22673](https://github.com/ggml-org/llama.cpp/pull/22673).
 
+### Evaluated and deferred: Qwen3.8-27B (2026-08-16)
+
+`Qwen/Qwen3.8-27B` was evaluated as a replacement and **rejected for now**. It is a
+**dense** model, not a MoE — confirmed from the GGUF metadata, not from the name:
+
+| | Qwen3.8-27B | Qwen3.6-35B-A3B |
+|---|---|---|
+| `general.architecture` | `qwen35` | `qwen35moe` |
+| `expert_count` | key absent | 256 (8 used) |
+| `*_exps` tensors | 0 | 120 |
+
+So every token reads all ~19GB of weights. Measured on this machine: **89.9 ms/token
+(11.1 tok/s)**, against the MoE's ~50 tok/s.
+
+End-to-end effect (`bench/bench_e2e.py`, 30 runs, `human_river` 3.5s, NeMo STT — stored in
+`bench/results_e2e.json` under `nemo-qwen3.8-27B`):
+
+| Path | Model | Median | Mean | Min | Max | Over 1s |
+|---|---|---|---|---|---|---|
+| batch | Qwen3.6-35B-A3B (MoE) | 735 ms | 723 ms | 415 ms | 939 ms | **0/30** |
+| batch | Qwen3.8-27B (dense) | 829 ms | 1204 ms | 799 ms | 2222 ms | **14/30** |
+| stream | Qwen3.6-35B-A3B (MoE) | 615 ms | 608 ms | 353 ms | 903 ms | **0/30** |
+| stream | Qwen3.8-27B (dense) | 772 ms | 1171 ms | 743 ms | 3721 ms | **12/30** |
+
+The median barely moves, but the distribution breaks into clusters (batch: ~810 / ~1445 /
+~2100 ms). The gaps are ~640 ms ≈ 7 tokens at 90 ms/token: time-to-first-audio is set by how
+many tokens the first sentence takes, and at 11 tok/s that length dominates the result. The
+MoE kept all 30 runs under a second; the dense 27B only manages 16.
+
+**Conclusion: stay on Qwen3.6-35B-A3B until a MoE build of Qwen3.8 in this size class
+ships.** (`Qwen/Qwen3.8-2.4T-A95B` is a MoE, but far too large for this machine.) Two things
+worth revisiting when that happens, both of which would also help the dense model:
+
+- `ttllm/run.sh` has a `SYSTEM_PROMPT` that constrains the first sentence to 15 characters,
+  currently commented out. It targets exactly the variance above.
+- `ggml-org/Qwen3.8-27B-GGUF` ships `mtp-Qwen3.8-27B-Q4_0.gguf` (~1.7GB) for
+  `--spec-type draft-mtp`.
+
 ## VRM viewer effects
 
 ### Random background rotation
@@ -162,11 +200,13 @@ into a natural standing position and bends the elbows by about 14° (`zundamon.h
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | self + llama-server reachability |
-| POST | `/warmup` | Preload WhisperX model |
+| POST | `/warmup` | Load the STT model and run a warmup inference |
 | POST | `/transcribe` | Audio → text |
 | POST | `/chat` | Text → LLM response (non-streaming) |
 | POST | `/voice_chat` | Audio → response (non-streaming) |
-| POST | `/voice_chat_stream` | Audio → SSE (transcript + token + done) **new** |
+| POST | `/voice_chat_stream` | Audio → SSE (transcript + token + done) |
+| POST | `/chat_stream` | Text → SSE (token + done); for callers that did STT themselves **new** |
+| WS | `/transcribe_stream` | Raw PCM (float32 16kHz mono) → partial / final **new** |
 
 ### three-vrm (port 8000)
 
@@ -176,16 +216,126 @@ into a natural standing position and bends the elbows by about 14° (`zundamon.h
 | GET | `/ws` | WebSocket (turn_start / speak / turn_end / transcript / error) |
 | POST | `/speak` | Speak given text |
 | POST | `/voice_chat_speak` | Audio → one-shot response (non-streaming) |
-| POST | `/voice_chat_speak_stream` | Audio → pipelined response **new** |
+| POST | `/voice_chat_speak_stream` | Audio → pipelined response |
+| GET | `/stt_chat_stream` | WebSocket: PCM during speech → partials → LLM → VOICEVOX **new** |
 | GET | `/images_list` | List background images |
 | GET | `/images/{name}` | Serve background image |
 | GET | `/vrm/{name}` | Serve VRM file |
 | GET | `/status` | Connected client count |
 
+## STT backend design
+
+### Why two backends
+
+Before the migration this was WhisperX-ROCm only. Moving to NeMo Speech did not remove it:
+both live in one process with a **runtime fallback**, for two reasons.
+
+1. NeMo runs here on a configuration NVIDIA does not support (ROCm). If it breaks, the
+   conversation should not stop.
+2. WhisperX is **more accurate on long, proper-noun-heavy speech** (numbers below), so
+   having the choice is worth the extra VRAM.
+
+### Layout
+
+```
+ttllm/stt/
+  base.py       STTBackend ABC — transcribe_path(path) -> str is the whole contract
+  audio.py      ffmpeg: webm/ogg/mp4 → 16kHz mono float32, plus 0.5s of trailing silence
+  nemo.py       NeMoBackend (default)
+  whisperx.py   WhisperXBackend (fallback)
+  streaming.py  StreamSession — per-utterance cache-aware streaming state
+  __init__.py   STTRouter — backend selection and fallback
+```
+
+`_transcribe_path()` survives in `server.py` as a thin wrapper, so `/transcribe`,
+`/voice_chat` and `/voice_chat_stream` did not change at all.
+
+### Decisions worth knowing
+
+- **`model.transcribe()` is not used.** It rebuilds a Lhotse dataloader per call, costing
+  0.2-0.4s per request. Calling the encoder and `rnnt_decoder_predictions_tensor()` directly
+  takes a 3.5s utterance from 119ms to 88ms.
+- **Audio decoding is ours to do.** The browser sends webm/opus, not 16kHz WAV. WhisperX hid
+  this inside `load_audio()`.
+- **0.5s of trailing silence is appended.** Cache-aware decoding cannot emit the final token
+  without right context, and a push-to-talk recording ends the instant the button is
+  released. Without the padding, VOICEVOX-generated audio lost its sentence-final particle.
+- **The language prompt is `ja-JP`.** A bare `ja` is not in the model's `prompt_dictionary`.
+- **Every fallback is logged at WARNING and surfaced in `/health`.** Silently switching
+  models is the worst possible failure mode.
+
+### Streaming path
+
+```
+Browser  getUserMedia → AudioWorklet (raw PCM) → downsample to 16kHz mono
+   │ WebSocket (float32 binary)
+three-vrm  /stt_chat_stream  ── relay ──▶  ttllm  /transcribe_stream
+   │                                        NeMo cache-aware streaming
+   │                                        att_context_size=[56,13] (1120ms chunks)
+   ◀── partial / final ─────────────────────┘
+   └─ final transcript → ttllm /chat_stream (SSE) → sentence split → VOICEVOX → existing WS
+```
+
+**MediaRecorder's `start(timeslice)` cannot be used**: webm/opus chunks after the first are
+not independently decodable, so the server cannot process them one at a time. Raw PCM via
+AudioWorklet is the way.
+
+**Mel features are recomputed over the whole utterance on every append.** Appending 100ms
+slices makes the mel preprocessor pad each call independently, putting a window artifact at
+every slice boundary — that turned 「川は」 into 「かは」 in testing. Accumulating the raw
+PCM and rebuilding the mel buffer (while preserving `buffer_idx`) gives frames identical to
+the offline path. `online_normalization=True` goes with it, because offline normalisation
+draws statistics from the entire utterance and is fundamentally incompatible with streaming.
+
+Per-session state (encoder cache, partial hypotheses) lives in `StreamSession`; only the
+model forward is serialised, through `NeMoBackend._lock`.
+
+### Measurements (speech end → final transcript, median of 20)
+
+| Audio length | A: whisperX | B: NeMo batch | C: NeMo streaming |
+|---|---|---|---|
+| 1.06s | 254ms | 84ms | **48ms** |
+| 3.50s | 287ms | 119ms | **49ms** |
+| 10.44s | 432ms | 221ms | **53ms** |
+| 12.84s | 545ms | 274ms | **50ms** |
+| 14.22s | 460ms | 255ms | **95ms** |
+
+**Streaming's finalisation time barely depends on utterance length** — only the last chunk
+is left to process. The one-shot paths scale with length, so the gap widens: 10.8x over
+whisperX at 12.8 seconds.
+
+Accuracy (CER, after normalising surface conventions) is 0.0% for all three configs on the
+nine short utterances, and **B and C match exactly on every clip** — streaming costs no
+accuracy. On long clips **whisperX wins** (9.9% vs 21.1% on the proper-noun-heavy one).
+
+End-to-end (speech end → first audio, 3.5s utterance, 30 runs each) is
+**whisperX 895ms → NeMo batch 735ms / streaming 614ms** (median). The distribution matters
+more than the median: **11/30 (37%) exceeded one second on whisperX, 0/30 on NeMo**.
+Medians for this metric swing between 895 and 1074ms across sessions, so read the
+**fraction over one second** rather than a single median — generating and synthesising the
+first sentence dominates the interval.
+
+Details in `docs/STT移植_PHASE3.md`; raw data in `bench/results.json`.
+
 ## Known limitations
 
-- **WhisperX hits a GPU memory fault past 60 seconds** (a known issue with ROCm 7.x +
-  PyTorch nightly). `vtt` works around it by force-cutting at 55 seconds via VAD. Avoid
+- **PyTorch (ROCm) requires the gfx1151-specific wheels.** Use `torch==2.8.0+rocm7.12.0` /
+  `torchaudio==2.8.0a0+rocm7.12.0` from `repo.amd.com/rocm/whl/gfx1151/`. The generic
+  `whl-multi-arch` build fails at runtime with `hipErrorInvalidImage`
+  (`kpack_load_code_object failed with error: 13`) on **every GPU op**. torch bundles its own
+  `rocm-sdk-libraries-gfx1151` (7.12), separate from system ROCm 10.0.
+  Importing torch first lets CTranslate2 reuse the loaded runtime. `ldd` alone does not
+  show the libraries actually loaded; see [ROCm 10 verification](docs/ROCM10.md).
+- **torch must be imported before ctranslate2/whisperx.** `whisperx.load_model` imports
+  ctranslate2 first (via `whisperx.asr`), and ctranslate2 imports torch during its own init.
+  In that order ctranslate2 loads the system ROCm first, and torch's bundled `libhipblaslt.so.1`
+  cannot resolve rocRoller symbols (`OSError: undefined symbol: _ZN9rocRoller...`). As a fix,
+  `ttllm/server.py` does `import torch` at the very top.
+- **Pin torchaudio to < 2.9.** pyannote-audio uses `torchaudio.info` / `AudioMetaData`, both
+  removed in torchaudio 2.9, so 2.9+ fails at import with `AttributeError`.
+- **Run three-vrm with the venv python.** system python (3.14) has no `aiohttp`.
+- **WhisperX hits a GPU memory fault past 60 seconds** (a known issue with ROCm + PyTorch).
+  `vtt` works around it by force-cutting at 55 seconds via VAD. Avoid
   long recordings on the browser side as well.
 - **Silent utterances previously caused a 500 error**. The WhisperX `IndexError` thrown
   when Silero VAD returns "No active speech" is now caught inside `_transcribe_path` and
@@ -201,7 +351,16 @@ into a natural standing position and bends the elbows by about 14° (`zundamon.h
 Every hard-coded path in shell scripts and Python has been replaced with `$USER` /
 `os.path.expanduser("~/...")` — there's no remaining `/home/<someone>` hardcoding. It
 works for other users too, as long as the directory layout
-(`~/AIassistant/`, `~/llama.cpp/`, `~/AIzunda/whisperX-rocm/.venv/`) is in place.
+(`~/AIassistant/`, `~/llama.cpp/`, `~/whisperx/whisperX-rocm/.venv/`) is in place.
+
+> :pencil: The pipeline's venv is **`~/AIassistant/ttllm/.venv`**
+> (`ttllm/run.sh` / `install.sh`; override with `TTLLM_VENV`). It holds both STT backends,
+> and three-vrm runs on the same python. The standalone
+> `~/whisperx/whisperX-rocm/.venv` is kept only for using whisperX from the CLI.
+> The `whisperX-rocm` symlink
+> under AIassistant points there too. It previously used `~/AIzunda/whisperX-rocm`, but after
+> upgrading to Ubuntu 26.04 (system python 3.14) the old venv's interpreter broke, so it was
+> consolidated onto `~/whisperx`.
 
 ## Troubleshooting
 
@@ -209,7 +368,14 @@ works for other users too, as long as the directory layout
 |---|---|
 | Nothing happens when pressing 🎤 | Click the screen to enable AudioContext. Also check the browser's mic permission |
 | Koteko doesn't speak / 500 error | Check ttllm logs via `tmux attach -t aiassistant`. Also test llama reachability with `curl :8001/health` |
-| First utterance is slow | Preload WhisperX with `curl -X POST :8001/warmup` |
+| STT fails with `undefined symbol: _ZN9rocRoller...` | torch is imported after ctranslate2. Confirm the `import torch` at the top of `ttllm/server.py` |
+| torch fails with `hipErrorInvalidImage` / `kpack_load_code_object failed` | The generic multi-arch torch is installed. Replace it with the gfx1151-specific wheels (README step 3) |
+| `module 'torchaudio' has no attribute 'AudioMetaData'` | torchaudio is 2.9+. Downgrade to 2.8.x (`2.8.0a0+rocm7.12.0`) |
+| three-vrm fails with `ModuleNotFoundError: aiohttp` | Run it with the venv python (`start_all.sh` already does). By hand: `$TTLLM_VENV/bin/python server.py`. If the venv lacks aiohttp: `VIRTUAL_ENV=$TTLLM_VENV uv pip install aiohttp` |
+| CTranslate2 cmake fails on `cmake_minimum_required` | CMake 4.x. Add `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` |
+| First utterance is slow | Preload the STT model with `curl -X POST :8001/warmup` (load + warmup pass, ~33s) |
+| STT quietly switched to whisperX | NeMo failed and the router fell back. `curl -s :8001/health \| jq .stt.last_error` |
+| NeMo dies with `Cannot reach https://huggingface.co/...: offline mode` | `run.sh` sets `HF_HUB_OFFLINE=1`. Run `ttllm/install.sh` to cache the model |
 | Arms point the wrong way (after swapping VRM) | Flip the sign of `rotation.z` in `zundamon.html:applyRestPose` |
 | Background doesn't change | Check the `/images_list` response in DevTools console. Reload the browser after adding images |
 | VRM doesn't load | Verify `VRM_DIR` in `server.py` against the actual file path. The filename has to match the `VRM_URL` in `zundamon.html` |

@@ -29,7 +29,7 @@ VOICEVOX (ずんだもん声) の音声合成結果を WebSocket でブラウザ
   ```
 - **ttllm ブリッジ**（WhisperX + llama.cpp）が `localhost:8001` で稼働していること
   （マイク入力機能を使う場合のみ必須。`~/AIassistant/ttllm/run.sh`）
-- **llama-server** が `localhost:8080` で稼働していること（ttllm の依存、MTP 投機デコード推奨）
+- **llama-server** が `localhost:9931` で稼働していること（ttllm の依存、MTP 投機デコード推奨）
 - **コテコ VRM** が `~/AIassistant/vroid/koteko.vrm` に配置されていること
   （変更したい場合は `server.py` の `VRM_DIR` および `zundamon.html` の `VRM_URL` を書き換える）
 

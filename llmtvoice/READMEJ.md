@@ -88,7 +88,7 @@ HTTP サービスとして独立しており、必要な部分だけ差し替え
 | 項目       | 要件 |
 | ---------- | ---- |
 | OS         | Ubuntu 24.04 LTS |
-| GPU        | AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1150, 48GB VRAM) |
+| GPU        | AMD Ryzen AI 9 HX 370 / Radeon 890M (gfx1150, 約 29GB GPU共有メモリ) |
 | ROCm       | 7.2.0 (`/opt/rocm`) |
 | Python     | 3.12.3 |
 | Docker     | 29.x（VOICEVOX 用） |
@@ -96,11 +96,13 @@ HTTP サービスとして独立しており、必要な部分だけ差し替え
 
 ROCm 環境変数は各 `run.sh` 内で設定済み。手動起動時も必要:
 ```bash
-export HSA_OVERRIDE_GFX_VERSION=11.5.0
 export ROCM_PATH=/opt/rocm
 export HIP_VISIBLE_DEVICES=0
 export LD_LIBRARY_PATH=/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:$LD_LIBRARY_PATH
 ```
+
+> **`HSA_OVERRIDE_GFX_VERSION` は設定しないこと。** すべて gfx1150 ネイティブ
+> ビルドなので、arch を override すると壊れます。`run.sh` で明示的に `unset` しています。
 
 ---
 
@@ -168,7 +170,7 @@ curl -s http://localhost:50021/version
 cd ~/llama.cpp/build/bin
 ./llama-server \
     -m ~/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf \
-    --host 127.0.0.1 --port 8080 \
+    --host 127.0.0.1 --port 9931 \
     -ngl 99 -c 8192 \
     --spec-type draft-mtp
 ```
@@ -195,7 +197,7 @@ cd ~/AIassistant/three-vrm && python3 server.py
 | サービス      | ポート | 主要エンドポイント |
 | ------------- | ------ | ------------------ |
 | VOICEVOX      | 50021  | `/audio_query`, `/synthesis` |
-| llama-server  | 8080   | `/v1/chat/completions` (OpenAI 互換) |
+| llama-server  | 9931   | `/v1/chat/completions` (OpenAI 互換) |
 | ttllm         | 8001   | `/voice_chat`, `/chat`, `/transcribe`, `/warmup`, `/health` |
 | three-vrm     | 8000   | `/zundamon.html`, `/voice_chat_speak`, `/speak`, `/ws`, `/vrm/*` |
 
@@ -262,7 +264,7 @@ multipart/form-data:
 ```bash
 # 各サービスの疎通
 curl -s http://localhost:50021/version
-curl -s http://localhost:8080/health
+curl -s http://localhost:9931/health
 curl -s http://localhost:8001/health
 
 # three-vrm 経由でテキスト → VOICEVOX → VRM 口パク

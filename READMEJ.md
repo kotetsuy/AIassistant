@@ -2,7 +2,7 @@
 
 > 音声: VOICEVOX:ずんだもん
 
-Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS → VRM リップシンク** を
+Ubuntu + AMD Ryzen AI 9 HX 370 (ROCm) 上で、**音声 → STT → LLM → TTS → VRM リップシンク** を
 一気通貫で動かすローカルスタック。ブラウザの 🎤 ボタンを押すとコテコが声で返します。
 
 <img width="1219" height="1140" alt="https---qiita-image-store s3 ap-northeast-1 amazonaws com-0-263486-86fd1211-a196-4c6d-bf7b-e4ff53d8c5ba" src="https://github.com/user-attachments/assets/4292a4f1-5239-4a83-8c9e-3c3d4610fed2" />
@@ -15,8 +15,8 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
     three-vrm サーバ (port 8000)
          ↓ POST /voice_chat_stream
        ttllm ブリッジ (port 8001)
-         ├─ WhisperX-ROCm (STT, large-v3-turbo)
-         └─ llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+         ├─ STT: NeMo Speech (既定) / WhisperX-ROCm (フォールバック)
+         └─ llama-server (Qwen3.6-35B-A3B MoE, port 9931)
          ↓ SSE で token ストリーム
     three-vrm: 文境界で分割 → VOICEVOX (port 50021) → WS 配信
          ↓ WS (audio + visemes)
@@ -32,29 +32,77 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 | パス | 役割 | ポート |
 |---|---|---|
 | `voicevox/` | VOICEVOX Engine (Docker, CPU 推論) | 50021 |
-| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 推論 (MoE, アクティブ約 3B) | 8080 |
+| `~/llama.cpp/build/bin/llama-server` | Qwen3.6 推論 (MoE, アクティブ約 3B) | 9931 |
 | `qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` | LLM モデル (MoE, 約 21GB) | — |
 | `qwen3.6/mmproj-F16.gguf` | 視覚エンコーダ (任意、マルチモーダル用) | — |
-| `ttllm/` | FastAPI ブリッジ (WhisperX + llama.cpp) | 8001 |
+| `ttllm/` | FastAPI ブリッジ (STT + llama.cpp)、共用 venv は `ttllm/.venv` | 8001 |
+| `ttllm/stt/` | STT バックエンド: `nemo.py` (既定) / `whisperx.py` (フォールバック) / `streaming.py` | — |
 | `three-vrm/` | aiohttp サーバ + VRM ビューア (HTML/three-vrm) | 8000 |
 | `vtt/` | CLI PTT マイク (任意) | — |
+| `bench/` | STT の速度・精度ベンチマーク (`docs/STT移植_PHASE3.md` 参照) | — |
 | `images/` | VRM ビューア背景 (5 分ごとにローテーション) | — |
 | `vroid/koteko.vrm` | コテコ VRM 1.0 モデル | — |
-| `whisperX-rocm/` | WhisperX の ROCm フォーク (`~/AIzunda/whisperX-rocm` へのシンボリックリンク) | — |
+| `Speech/` | NeMo Speech の ROCm ブランチ (`~/Speech` へのシンボリックリンク、`rocm-inference`) | — |
+| `whisperX-rocm/` | WhisperX の ROCm フォーク (`~/whisperx/whisperX-rocm` へのシンボリックリンク) | — |
 
 > :pencil: 現在の既定 LLM は **Qwen3.6-35B-A3B (MoE)** です。以前は dense な
 > Qwen3.6-27B + MTP 投機デコードを使っていましたが、帯域が細い iGPU では MoE の方が
 > 速いため切り替えました。経緯と実測は [`TECHNICALJ.md`](./TECHNICALJ.md) を参照。
+>
+> **Qwen3.8-27B は 2026-08-16 に評価し、採用を見送りました。** MoE ではなく dense なので
+> 本機では 11 tok/s に留まり、初音までの時間が 30 回中 14 回 1 秒を超えます (MoE は 0 回)。
+> このクラスで MoE 版が出た時点で再評価します。実測値は
+> [`TECHNICALJ.md`](./TECHNICALJ.md) に記載。
 
 ### 前提
 
-- **OS** : Ubuntu 24.04.4 LTS
-- **GPU** : AMD Ryzen AI Max+ 395 / Radeon 8060S (gfx1150、48GB VRAM)
-- **ROCm** : 7.2.1 (`/opt/rocm`)
-- **Python** : 3.12.3
+- **OS** : Ubuntu 26.04 (resolute)
+- **GPU** : AMD Ryzen AI 9 HX 370 / Radeon 890M (gfx1150、約 29GB GPU共有メモリ)
+- **ROCm** : 10.0.0 (`/opt/rocm`)。Ubuntu 26.04 では apt でネイティブ導入できます
+  (`amdrocm-core-sdk10.0-gfx1150` を `stable.repo.amd.com/rocm/core/packages/ubuntu2604` から)。
+  カーネル同梱 amdgpu が gfx1150 対応済みなので DKMS / `amdgpu-install` は不要。
+- **Python** : system 3.14 / 各 venv は 3.12 (`.python-version` で固定)
 - **Docker** : 29.x (VOICEVOX 用)
 - **ブラウザ** : Google Chrome (`AudioContext` を使うため Firefox でも可)
 - **tmux / curl / uv / huggingface_hub (hf CLI)** : 起動スクリプトで使用
+
+## STT バックエンド
+
+音声認識は既定で **NeMo Speech**(`nvidia/nemotron-3.5-asr-streaming-0.6b`)を使い、
+**WhisperX-ROCm** を実行時フォールバックとして残しています。両方が同じ venv に同居して
+いるので、NeMo がロードに失敗しても推論中に落ちても、その場で切り替わって応答を継続します。
+切り替わったことは WARNING ログと `/health` に必ず出します — **無言で別モデルに変わるのが
+一番まずい**ためです。
+
+| `STT_BACKEND` | 挙動 |
+|---|---|
+| `auto`(既定) | NeMo を使い、失敗したら WhisperX へフォールバック |
+| `nemo` | NeMo のみ。失敗は失敗として扱う |
+| `whisperx` | WhisperX のみ(移植前と同じ挙動) |
+
+```bash
+STT_BACKEND=whisperx ./ttllm/run.sh     # 旧バックエンドを強制
+curl -s localhost:8001/health | jq .stt # どちらが実際に使われているか
+```
+
+短い会話文なら**両者の転写は一致**し、NeMo が 2〜3 倍速い一方、**長く固有名詞の多い発話では
+WhisperX の方が正確**です。実測値は [`docs/STT移植_PHASE3.md`](./docs/STT移植_PHASE3.md)。
+
+### ストリーミング STT(任意)
+
+NeMo は cache-aware ストリーミングにも対応しています。発話中からブラウザが生 PCM を
+WebSocket で送るので、**発話の長さによらず、話し終えてから 50〜100ms で転写が確定**します
+(一括経路は 250〜550ms で、発話が長いほど伸びます)。
+
+**既定は off** です。ビューアの URL に `?stt=stream` を付けるか、
+`localStorage.sttStreaming = "1"` で永続化します:
+
+```
+http://localhost:8000/zundamon.html?stt=stream
+```
+
+一括経路は一切変更していないので、off のときや使えないとき(WhisperX バックエンド稼働中など)は
+従来どおり動きます。
 
 詳細なセットアップは各サブディレクトリの `READMEJ.md` を参照:
 `ttllm/READMEJ.md` / `vtt/READMEJ.md` / `three-vrm/READMEJ.md` / `voicevox/READMEJ.md` /
@@ -64,15 +112,19 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 
 ## 1. リポジトリと依存物の取得
 
-本体リポジトリには `whisperX-rocm` / `llama.cpp` / `qwen3.6` をシンボリックリンクで参照する構造になっているので、まず本体と依存物を **ホームディレクトリ直下** に並べて配置します。
+本体リポジトリには `whisperX-rocm` / `Speech` / `llama.cpp` / `qwen3.6` をシンボリックリンクで参照する構造になっているので、まず本体と依存物を **ホームディレクトリ直下** に並べて配置します。
 
 ```bash
 cd ~
 git clone https://github.com/kotetsuy/AIassistant.git
 git clone https://github.com/ggml-org/llama.cpp.git
+
+# NeMo Speech — 既定の STT バックエンド。ROCm 対応差分は rocm-inference
+# ブランチにしか入っていないので、必ずこのブランチを取得すること。
+git clone -b rocm-inference https://github.com/kotetsuy/Speech.git
 ```
 
-WhisperX の ROCm フォークと CTranslate2 の ROCm フォークも別途必要です:
+フォールバック STT 用に、WhisperX の ROCm フォークと CTranslate2 の ROCm フォークも別途必要です:
 
 ```bash
 mkdir -p ~/whisperx && cd ~/whisperx
@@ -80,13 +132,20 @@ git clone https://github.com/<your_whisperx_rocm_fork>/whisperX-rocm.git
 git clone https://github.com/<your_ctranslate2_rocm_fork>/ctranslate2-rocm.git
 ```
 
-> :pencil: 実機では `whisperX-rocm` を `~/AIzunda/whisperX-rocm` に置いていますが、新規構築する場合は `~/whisperx/whisperX-rocm` でも構いません。AIassistant 側の `whisperX-rocm` は **シンボリックリンク** なので、リンク先は環境に合わせて貼り直してください。
+> :pencil: `whisperX-rocm` は `~/whisperx/whisperX-rocm` に置きます (AIassistant 側の
+> `whisperX-rocm` はそこへのシンボリックリンク)。ttllm の `run.sh` / `install.sh` もこのパスを
+> 既定にしています。以前は `~/AIzunda/whisperX-rocm` に置いていましたが、OS 更新 (Ubuntu
+> 26.04 / system python 3.14) で旧 venv が壊れたため `~/whisperx` 側に統一しました。
+> リンク先を変える場合は `ln -sfn <path> whisperX-rocm` を変更してください。
 
 こちらも参照してください
 
 https://qiita.com/kotetsu_yama/items/449e0d0527ab3a233fb8
 
 ---
+
+ROCm 10 の移行・検証は [docs/ROCM10.md](docs/ROCM10.md) を参照してください。
+音声互換性のため、以下の PyTorch / torchaudio 2.8 固定は維持します。
 
 ## 2. CTranslate2-ROCm をソースビルド
 
@@ -96,20 +155,22 @@ https://qiita.com/kotetsu_yama/items/449e0d0527ab3a233fb8
 cd ~/whisperx/ctranslate2-rocm
 mkdir -p build && cd build
 
-export HSA_OVERRIDE_GFX_VERSION=11.5.0
 export AMDGPU_TARGETS=gfx1150
 
 cmake .. -DWITH_HIP=ON -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
   -DCMAKE_HIP_ARCHITECTURES=gfx1150 -DCMAKE_BUILD_TYPE=Release \
-  -DOPENMP_RUNTIME=COMP \
+  -DOPENMP_RUNTIME=COMP -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_CXX_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
   -DCMAKE_C_COMPILER=/opt/rocm/lib/llvm/bin/clang \
   -DCMAKE_PREFIX_PATH=/opt/rocm -DBUILD_CLI=OFF
-make -j$(nproc) && sudo make install
+make -j$(nproc) && sudo make install && sudo ldconfig
 ```
 
 `/usr/local/lib/libctranslate2.so` が入れば成功です。
+
+> :warning: CMake 4.x では同梱 `third_party/cpu_features` の `cmake_minimum_required`
+> が古すぎて configure が失敗します。上記の `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` が必須です。
 
 ---
 
@@ -117,20 +178,40 @@ make -j$(nproc) && sudo make install
 
 ```bash
 cd ~/whisperx/whisperX-rocm
-uv venv && uv pip install -e .
+uv venv && uv pip install -e .   # venv は .python-version により 3.12
+
+# uv pip install -e . は既定で NVIDIA CUDA 版 torch を入れてしまうので、
+# gfx1150 専用の ROCm ホイールに差し替える (下の「PyTorch (ROCm)」参照)
+uv pip uninstall torch torchaudio
+uv pip install \
+  --index-url https://repo.amd.com/rocm/whl/gfx1150/ \
+  --extra-index-url https://pypi.org/simple \
+  --index-strategy unsafe-best-match --prerelease allow \
+  torch==2.8.0+rocm7.12.0 torchaudio==2.8.0a0+rocm7.12.0
 
 # ROCm 版 ctranslate2 の Python バインディングを再インストール
 rm -rf .venv/lib/python3.12/site-packages/ctranslate2*
 export CTRANSLATE2_ROOT=/usr/local
-uv pip install --reinstall pybind11 ~/whisperx/ctranslate2-rocm/python
+uv pip install --reinstall --no-deps pybind11 ~/whisperx/ctranslate2-rocm/python
 ```
+
+> :warning: **PyTorch (ROCm) は gfx1150 専用インデックスを使うこと。**
+> 汎用の `whl-multi-arch` 版は実行時に `hipErrorInvalidImage`
+> (`kpack_load_code_object failed`) で全 GPU 操作が落ちます。また **torchaudio は 2.9 未満**
+> に固定します (pyannote が `torchaudio.info` / `AudioMetaData` を使うが 2.9 で削除された)。
+> これらのホイールは cp310 が無いため venv は Python 3.11+ が必須です。
+
+> :warning: **`HSA_OVERRIDE_GFX_VERSION` は設定しないこと。**
+> gfx1150 版 PyTorch ホイール・CTranslate2-ROCm・llama.cpp のいずれも gfx1150
+> ネイティブビルドなので、arch を override すると壊れます。シェルの profile などから
+> export されている場合に備えて `start_all.sh` と `ttllm/run.sh` で明示的に `unset` しています。
 
 確認:
 
 ```bash
 .venv/bin/python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 # → CUDA: True  (ROCm の HIP レイヤーが CUDA API を翻訳している)
-.venv/bin/python -c "import ctranslate2; print(ctranslate2.__version__)"
+.venv/bin/python -c "import torch; import ctranslate2; print(ctranslate2.__version__)"
 ```
 
 ---
@@ -145,7 +226,6 @@ cd ~/llama.cpp
 git pull --ff-only origin master
 
 mkdir -p build && cd build
-export HSA_OVERRIDE_GFX_VERSION=11.5.0
 export AMDGPU_TARGETS=gfx1150
 
 cmake .. -DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1150 \
@@ -188,36 +268,71 @@ ls -lh ~/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 ```
 
 > アクティブパラメータは 1 トークンあたり約 3B 相当なので、総 34.66B の割に高速です
-> (Ryzen AI Max+ 395 で tg128 ≈ 50 t/s)。詳細なベンチは `qwen3.6/READMEJ.md` を参照。
+> (Ryzen AI 9 HX 370 で tg128 ≈ 50 t/s)。詳細なベンチは `qwen3.6/READMEJ.md` を参照。
 
 ---
 
 ## 6. AIassistant 内のシンボリックリンクを張る
 
-`~/AIassistant` 配下から `llama.cpp` / `whisperX-rocm` / `qwen3.6` を相対パスで参照できるようにします。
+`~/AIassistant` 配下から `llama.cpp` / `whisperX-rocm` / `Speech` / `qwen3.6` を相対パスで
+参照できるようにします。**AIassistant 内のファイルは絶対パスではなく必ずこのシンボリック
+リンク経由で参照します。**
 
 ```bash
 cd ~/AIassistant
 ln -sf ../llama.cpp llama.cpp
 ln -sf ../whisperx/whisperX-rocm whisperX-rocm
+ln -sf ../Speech Speech
 ln -sf ../qwen3.6 qwen3.6
 
 ls -la
 # llama.cpp -> ../llama.cpp
 # qwen3.6 -> ../qwen3.6
+# Speech -> ../Speech
 # whisperX-rocm -> ../whisperx/whisperX-rocm
+```
+
+`Speech` は **`rocm-inference` ブランチ**である必要があります。NeMo の ROCm 対応差分は
+このブランチにしか無く、無いとモデルのロードに失敗します。`start_all.sh` はシンボリック
+リンクの存在を、`ttllm/install.sh` はブランチを確認します。
+
+```bash
+git -C ~/Speech branch --show-current   # rocm-inference
 ```
 
 ---
 
-## 7. ttllm ブリッジの依存を venv に追加
+## 7. 共用 venv を構築
 
 ```bash
 cd ~/AIassistant/ttllm
 ./install.sh
 ```
 
-`fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` が **WhisperX-ROCm の venv に追加** されます (専用 venv は作らず共有)。
+**`ttllm/.venv`** が作られ、**2 つの STT バックエンドとブリッジと three-vrm** がすべてここに入ります:
+
+- `torch==2.8.0+rocm7.12.0`(gfx1150 専用 wheel インデックス)
+  — WhisperX が `torchaudio<2.9` を要求するため 2.8 系に固定。NeMo は `>=2.6` なので問題ない
+- `whisperx` とローカルビルドの ROCm 版 `ctranslate2`
+- `nemo-toolkit[asr]`(`Speech` シンボリックリンク経由)
+- `fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` / `aiohttp`
+
+NeMo モデルの事前キャッシュも行います。`run.sh` は `HF_HUB_OFFLINE=1` で起動するため、
+キャッシュが無いと起動できません。
+
+場所を変えたい場合は `TTLLM_VENV` で上書きできます。`~/whisperx/whisperX-rocm/.venv` の
+単体 venv はそのまま残ります(これは別に作られる追加の venv です)。
+
+> :pencil: **three-vrm も同じ venv の python で起動します。** system python (Ubuntu 26.04 は
+> 3.14) には `aiohttp` が無いため、`start_all.sh` は `$TTLLM_VENV/bin/python server.py`
+> で three-vrm を起動します。`install.sh` が `aiohttp` も入れますが、別の方法で venv を
+> 作った場合は:
+>
+> ```bash
+> VIRTUAL_ENV=~/AIassistant/ttllm/.venv uv pip install aiohttp
+> ```
+>
+> 手で起動する場合も `python3 server.py` ではなく venv の python を使ってください。
 
 ---
 
@@ -268,7 +383,7 @@ cd ~/AIassistant
 以下が直列で立ち上がり、HTTP health check で待ち合わせます:
 
 1. VOICEVOX (Docker, port 50021)
-2. llama-server (Qwen3.6-35B-A3B MoE, port 8080)
+2. llama-server (Qwen3.6-35B-A3B MoE, port 9931)
 3. ttllm ブリッジ (port 8001)
 4. WhisperX warmup (`POST /warmup` を叩いて初回のモデルロードを済ませる)
 5. three-vrm サーバ (port 8000)
@@ -308,7 +423,7 @@ tmux attach -t aiassistant   # ログを見る
 | window | コマンド |
 |---|---|
 | 0 voicevox | `docker logs -f voicevox_engine` |
-| 1 llama | `llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --port 8080 -ngl 99 -c 8192 -fit off` |
+| 1 llama | `llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --port 9931 -ngl 99 -c 8192 -fit off` |
 | 2 ttllm | `ttllm/run.sh` (uvicorn) |
 | 3 three-vrm | `python3 three-vrm/server.py` |
 | 4 vtt | `vtt/run.sh --device USB` (CLI PTT, 任意) |

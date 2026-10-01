@@ -3,8 +3,8 @@
 #
 # 起動順:
 #   1. VOICEVOX (docker)           :50021
-#   2. llama-server (qwen3.6)      :8080
-#   3. ttllm (WhisperX ↔ llama)    :8001  → /warmup 叩く
+#   2. llama-server (qwen3.6 MoE)  :9931
+#   3. ttllm (STT[NeMo/whisperX] ↔ llama) :8001  → /warmup 叩く
 #   4. three-vrm (VRM ビューア)    :8000
 #   5. Chrome で zundamon.html を開く
 #   6. vtt を PTT モードで起動 (任意 / ブラウザの 🎤 ボタンがメイン動線)
@@ -22,10 +22,10 @@ export PULSE_SERVER="${PULSE_SERVER:-unix:${XDG_RUNTIME_DIR}/pulse/native}"
 
 SESSION="aiassistant"
 
-LLAMA_BIN="/home/$USER/llama.cpp/build/bin/llama-server"
+LLAMA_BIN="${LLAMA_BIN:-/home/$USER/llama.cpp/build/bin/llama-server}"
 QWEN_MODEL="/home/$USER/AIassistant/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
 LLAMA_HOST="127.0.0.1"
-LLAMA_PORT="8080"
+LLAMA_PORT="9931"
 LLAMA_CTX="8192"
 LLAMA_NGL="99"
 
@@ -36,14 +36,21 @@ TTLLM_DIR="/home/$USER/AIassistant/ttllm"
 THREE_VRM_DIR="/home/$USER/AIassistant/three-vrm"
 VTT_DIR="/home/$USER/AIassistant/vtt"
 
+# three-vrm は aiohttp を使うが system python (Ubuntu 26.04 は 3.14) には入っていない。
+# ttllm と同じ共用 venv (NeMo + whisperX 同居) の python で起動する。
+TTLLM_VENV="${TTLLM_VENV:-/home/$USER/AIassistant/ttllm/.venv}"
+
 BROWSER_URL="http://localhost:8000/zundamon.html"
 
-# gfx1150 (Ryzen AI Max+ 395) 向け ROCm env。
-export HSA_OVERRIDE_GFX_VERSION="${HSA_OVERRIDE_GFX_VERSION:-11.5.0}"
+# gfx1150 (Ryzen AI 9 HX 370) 向け ROCm env。
+# HSA_OVERRIDE_GFX_VERSION は設定しない。
+# repo.amd.com の gfx1150 wheel も llama.cpp も gfx1150 ネイティブビルドなので
+# override すると壊れる。
+unset HSA_OVERRIDE_GFX_VERSION
 export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
 export AMDGPU_TARGETS="${AMDGPU_TARGETS:-gfx1150}"
-export LD_LIBRARY_PATH="/usr/local/lib:/opt/rocm/lib:/opt/rocm/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/usr/local/lib:${ROCM_PATH}/lib:${ROCM_PATH}/lib/llvm/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # ---- helpers ------------------------------------------------------------
 
@@ -88,6 +95,8 @@ command -v google-chrome >/dev/null || warn "google-chrome が見つかりませ
 [[ -f "$QWEN_MODEL"          ]] || die "Qwen モデルが見つかりません: $QWEN_MODEL"
 [[ -x "$TTLLM_DIR/run.sh"    ]] || die "ttllm/run.sh がありません"
 [[ -d "$THREE_VRM_DIR"       ]] || die "three-vrm ディレクトリがありません"
+[[ -x "$TTLLM_VENV/bin/python" ]] || die "共用 venv がありません: $TTLLM_VENV (ttllm/install.sh を実行してください)"
+[[ -e "/home/$USER/AIassistant/Speech" ]] || die "Speech symlink がありません: ln -s ../Speech /home/$USER/AIassistant/Speech"
 [[ -x "$VTT_DIR/run.sh"      ]] || die "vtt/run.sh がありません"
 
 # 既存セッションは作り直す。
@@ -121,8 +130,7 @@ wait_http "VOICEVOX" "http://localhost:50021/version" 60
 
 # ---- 2. llama-server ----------------------------------------------------
 
-LLAMA_CMD="HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION} \
-ROCM_PATH=${ROCM_PATH} \
+LLAMA_CMD="ROCM_PATH=${ROCM_PATH} \
 HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES} \
 LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
 ${LLAMA_BIN} -m ${QWEN_MODEL} --host ${LLAMA_HOST} --port ${LLAMA_PORT} -ngl ${LLAMA_NGL} -c ${LLAMA_CTX} -fit off"
@@ -138,9 +146,9 @@ new_window "ttllm" "cd ${TTLLM_DIR} && ./run.sh"
 
 wait_http "ttllm" "http://localhost:8001/health" 60
 
-# ---- 4. WhisperX warmup -------------------------------------------------
+# ---- 4. STT warmup ------------------------------------------------------
 
-log "WhisperX を warmup (初回ロードを先に済ませる) ..."
+log "STT を warmup (モデルロード + 初回推論を先に済ませる) ..."
 if curl -sf -X POST -m 300 http://localhost:8001/warmup -o /dev/null; then
     log "  warmup 完了"
 else
@@ -149,7 +157,7 @@ fi
 
 # ---- 5. three-vrm -------------------------------------------------------
 
-new_window "three-vrm" "cd ${THREE_VRM_DIR} && python3 server.py"
+new_window "three-vrm" "cd ${THREE_VRM_DIR} && ${TTLLM_VENV}/bin/python server.py"
 
 wait_http "three-vrm" "http://localhost:8000/status" 30
 

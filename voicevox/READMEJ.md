@@ -117,7 +117,7 @@ synthesize("こんにちは、ずんだもんなのだ！")
    ↓
 WhisperX (STT) - ~/AIassistant/whisperX-rocm (~/AIzunda/whisperX-rocm symlink)
    ↓ テキスト
-llama-server (LLM) - Qwen3.6-27B MTP, localhost:8080
+llama-server (LLM) - Qwen3.6-27B MTP, localhost:9931
    ↓ 応答テキスト
 VOICEVOX Engine (TTS) ← ここ - localhost:50021
    ↓ WAV音声

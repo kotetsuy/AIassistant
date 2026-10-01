@@ -1,0 +1,386 @@
+{
+  "load_sec": {
+    "nemo": 33.3,
+    "whisperx": 0.7
+  },
+  "runs": 20,
+  "rows": [
+    {
+      "audio": "ritsu_greeting",
+      "duration_sec": 0.85,
+      "reference": "こんにちは",
+      "A_whisperx": {
+        "median_ms": 253.9,
+        "mean_ms": 253.7,
+        "min_ms": 247.1,
+        "max_ms": 260.3,
+        "text": "こんにちは。",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 81.0,
+        "mean_ms": 81.1,
+        "min_ms": 76.5,
+        "max_ms": 86.9,
+        "text": "こんにちは",
+        "cer": 0.0
+      },
+      "C_nemo_stream": {
+        "median_ms": 101.6,
+        "mean_ms": 101.6,
+        "min_ms": 101.1,
+        "max_ms": 102.6,
+        "text": "こんにちは",
+        "cer": 0.0
+      }
+    },
+    {
+      "audio": "zundamon_greeting",
+      "duration_sec": 1.06,
+      "reference": "こんにちは",
+      "A_whisperx": {
+        "median_ms": 253.8,
+        "mean_ms": 254.5,
+        "min_ms": 245.9,
+        "max_ms": 266.0,
+        "text": "こんにちは",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 84.0,
+        "mean_ms": 83.9,
+        "min_ms": 79.2,
+        "max_ms": 88.4,
+        "text": "こんにちは",
+        "cer": 0.0
+      },
+      "C_nemo_stream": {
+        "median_ms": 47.7,
+        "mean_ms": 47.7,
+        "min_ms": 46.9,
+        "max_ms": 48.3,
+        "text": "こんにちは",
+        "cer": 0.0
+      }
+    },
+    {
+      "audio": "ritsu_river",
+      "duration_sec": 1.91,
+      "reference": "日本で一番長い川は",
+      "A_whisperx": {
+        "median_ms": 282.9,
+        "mean_ms": 282.8,
+        "min_ms": 274.8,
+        "max_ms": 292.7,
+        "text": "日本で一番長い川は、",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 94.7,
+        "mean_ms": 94.8,
+        "min_ms": 90.4,
+        "max_ms": 98.8,
+        "text": "日本で一番長い川は",
+        "cer": 0.0
+      },
+      "C_nemo_stream": {
+        "median_ms": 100.8,
+        "mean_ms": 100.8,
+        "min_ms": 100.0,
+        "max_ms": 101.2,
+        "text": "日本で一番長い川は",
+        "cer": 0.0
+      }
+    },
+    {
+      "audio": "ritsu_mountain",
+      "duration_sec": 2.15,
+      "reference": "日本で二番目に高い山は",
+      "A_whisperx": {
+        "median_ms": 292.1,
+        "mean_ms": 292.7,
+        "min_ms": 286.7,
+        "max_ms": 308.5,
+        "text": "日本で2番目に高い山は、",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 113.3,
+        "mean_ms": 112.9,
+        "min_ms": 108.1,
+        "max_ms": 116.4,
+        "text": "日本で二番目に高い山は",
+        "cer": 0.0
+      },
+      "C_nemo_stream": {
+        "median_ms": 105.7,
+        "mean_ms": 105.8,
+        "min_ms": 105.1,
+        "max_ms": 106.7,
+        "text": "日本で二番目に高い山は",
+        "cer": 0.0
+      }
+    },
+    {
+      "audio": "zundamon_river",
+      "duration_sec": 2.31,
+      "reference": "日本で一番長い川は",
+      "A_whisperx": {
+        "median_ms": 283.6,
+        "mean_ms": 284.8,
+        "min_ms": 274.8,
+        "max_ms": 295.4,
+        "text": "日本で一番長い川は",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 111.6,
+        "mean_ms": 111.7,
+        "min_ms": 107.4,
+        "max_ms": 114.7,
+        "text": "日本で一番長い川は",
+        "cer": 0.0
+      },
+      "C_nemo_stream": {
+        "median_ms": 50.0,
+        "mean_ms": 50.0,
+        "min_ms": 49.6,
+        "max_ms": 50.5,
+        "text": "日本で一番長い川は",
+        "cer": 0.0
+      }
+    },
+    {
+      "audio": "zundamon_mountain",
+      "duration_sec": 2.45,
+      "reference": "日本で二番目に高い山は",
+      "A_whisperx": {
+        "median_ms": 290.8,
+        "mean_ms": 290.3,
+        "min_ms": 283.2,
+        "max_ms": 295.4,
+        "text": "日本で2番目に高い山は",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 112.0,
+        "mean_ms": 112.5,
+        "min_ms": 107.7,
+        "max_ms": 116.7,
+        "text": "日本で二番目に高い山は",
+        "cer": 0.0
+      },
+      "C_nemo_stream": {
+        "median_ms": 51.5,
+        "mean_ms": 51.4,
+        "min_ms": 50.9,
+        "max_ms": 51.9,
+        "text": "日本で二番目に高い山は",
+        "cer": 0.0
+      }
+    },
+    {
+      "audio": "human_greeting",
+      "duration_sec": 3.25,
+      "reference": "こんにちは",
+      "A_whisperx": {
+        "median_ms": 258.2,
+        "mean_ms": 258.1,
+        "min_ms": 253.9,
+        "max_ms": 262.1,
+        "text": "こんにちは。",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 108.1,
+        "mean_ms": 107.7,
+        "min_ms": 104.0,
+        "max_ms": 110.7,
+        "text": "こんにちは",
+        "cer": 0.0
+      },
+      "C_nemo_stream": {
+        "median_ms": 102.7,
+        "mean_ms": 102.8,
+        "min_ms": 102.3,
+        "max_ms": 103.7,
+        "text": "こんにちは",
+        "cer": 0.0
+      }
+    },
+    {
+      "audio": "human_mountain",
+      "duration_sec": 3.5,
+      "reference": "日本で二番目に高い山は",
+      "A_whisperx": {
+        "median_ms": 292.8,
+        "mean_ms": 293.7,
+        "min_ms": 288.0,
+        "max_ms": 302.6,
+        "text": "日本で2番目に高い山は、",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 117.1,
+        "mean_ms": 117.5,
+        "min_ms": 114.5,
+        "max_ms": 121.3,
+        "text": "日本で二番目に高い山は",
+        "cer": 0.0
+      },
+      "C_nemo_stream": {
+        "median_ms": 49.2,
+        "mean_ms": 49.3,
+        "min_ms": 48.8,
+        "max_ms": 50.1,
+        "text": "日本で二番目に高い山は",
+        "cer": 0.0
+      }
+    },
+    {
+      "audio": "human_river",
+      "duration_sec": 3.5,
+      "reference": "日本で一番長い川は",
+      "A_whisperx": {
+        "median_ms": 287.1,
+        "mean_ms": 287.7,
+        "min_ms": 282.6,
+        "max_ms": 297.4,
+        "text": "日本で一番長い川は、",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 118.9,
+        "mean_ms": 117.6,
+        "min_ms": 112.0,
+        "max_ms": 120.3,
+        "text": "日本で一番長い川は",
+        "cer": 0.0
+      },
+      "C_nemo_stream": {
+        "median_ms": 49.1,
+        "mean_ms": 49.2,
+        "min_ms": 48.7,
+        "max_ms": 50.6,
+        "text": "日本で一番長い川は",
+        "cer": 0.0
+      }
+    },
+    {
+      "audio": "long1",
+      "duration_sec": 10.44,
+      "reference": "インターネットで 敵対的環境コース について検索すると おそらく現地企業の住所が出てくるでしょう",
+      "A_whisperx": {
+        "median_ms": 432.1,
+        "mean_ms": 433.7,
+        "min_ms": 424.7,
+        "max_ms": 444.1,
+        "text": "インターネットで敵対的環境コースについて検索するとおそらく現地企業の住所が出てくるでしょう",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 221.4,
+        "mean_ms": 221.8,
+        "min_ms": 217.2,
+        "max_ms": 225.6,
+        "text": "インターネットで敵体的環境コースについて検索すると、おそらく現地企業の住所が出てくるでしょう。",
+        "cer": 0.022222222222222223
+      },
+      "C_nemo_stream": {
+        "median_ms": 53.4,
+        "mean_ms": 53.4,
+        "min_ms": 52.8,
+        "max_ms": 53.9,
+        "text": "インターネットで敵体的環境コースについて検索すると、おそらく現地企業の住所が出てくるでしょう。",
+        "cer": 0.022222222222222223
+      }
+    },
+    {
+      "audio": "long4",
+      "duration_sec": 12.54,
+      "reference": "その長い顎には70本以上の鋭い歯が並び 口蓋には別の歯列があり つまりここを通ったら逃げ道はないということになります",
+      "A_whisperx": {
+        "median_ms": 460.9,
+        "mean_ms": 462.0,
+        "min_ms": 450.5,
+        "max_ms": 474.8,
+        "text": "その長い顎には70本以上の鋭い歯が並び、郊外には別の私立があり、つまりここを通ったらねぎめちゃわないということになります。",
+        "cer": 0.17857142857142858
+      },
+      "B_nemo_batch": {
+        "median_ms": 260.7,
+        "mean_ms": 260.5,
+        "min_ms": 257.5,
+        "max_ms": 262.5,
+        "text": "その長い顎には七十本以上の数大波が並び、郊外には別の私立があり、つまりここを通ったらねぎ道はないということになります。",
+        "cer": 0.17857142857142858
+      },
+      "C_nemo_stream": {
+        "median_ms": 49.2,
+        "mean_ms": 49.2,
+        "min_ms": 48.6,
+        "max_ms": 50.0,
+        "text": "その長い顎には七十本以上の数大波が並び、郊外には別の私立があり、つまりここを通ったらねぎ道はないということになります。",
+        "cer": 0.17857142857142858
+      }
+    },
+    {
+      "audio": "long3",
+      "duration_sec": 12.84,
+      "reference": "バルセロナの公用語はカタルーニャ語とスペイン語です 約半数がカタルーニャ語を好み 大多数がカタルーニャ語を理解し ほぼ全員がスペイン語を知っています",
+      "A_whisperx": {
+        "median_ms": 545.1,
+        "mean_ms": 545.0,
+        "min_ms": 533.6,
+        "max_ms": 557.6,
+        "text": "バルセアナの公用語はカタルーネ語とスペイン語です。約半数がカタルーネ語を好み、大多数がカタルーネ語を理解し、ほぼ全員がスペイン語を知っています。",
+        "cer": 0.09859154929577464
+      },
+      "B_nemo_batch": {
+        "median_ms": 273.7,
+        "mean_ms": 273.8,
+        "min_ms": 271.2,
+        "max_ms": 276.3,
+        "text": "バルセアの公用後はカタルーネごとスペインゴリス、約数がカタルーネがお好み、大多数がカタルーニ語を理解し、ほぼ全員がスペイン語を知っています。",
+        "cer": 0.2112676056338028
+      },
+      "C_nemo_stream": {
+        "median_ms": 50.3,
+        "mean_ms": 50.4,
+        "min_ms": 49.9,
+        "max_ms": 51.2,
+        "text": "バルセアの公用後はカタルーネごとスペインゴリス、約数がカタルーネがお好み、大多数がカタルーニ語を理解し、ほぼ全員がスペイン語を知っています。",
+        "cer": 0.2112676056338028
+      }
+    },
+    {
+      "audio": "long2",
+      "duration_sec": 14.22,
+      "reference": "また 北側に行くなら世界的に有名なマリア像の聖地であるファティマの聖母の聖域神社を訪れましょう",
+      "A_whisperx": {
+        "median_ms": 460.0,
+        "mean_ms": 499.6,
+        "min_ms": 452.5,
+        "max_ms": 1168.8,
+        "text": "また北側に行くなら世界的に有名なマリア像の聖地であるファティマの聖母の聖域神社を訪れましょう。",
+        "cer": 0.0
+      },
+      "B_nemo_batch": {
+        "median_ms": 254.7,
+        "mean_ms": 254.2,
+        "min_ms": 249.6,
+        "max_ms": 258.3,
+        "text": "また、北側に行くなら世界的に有名なマリア像の聖地であるファティマの聖母の成域神社を訪れましょう。",
+        "cer": 0.021739130434782608
+      },
+      "C_nemo_stream": {
+        "median_ms": 94.9,
+        "mean_ms": 94.8,
+        "min_ms": 94.2,
+        "max_ms": 95.3,
+        "text": "また、北側に行くなら世界的に有名なマリア像の聖地であるファティマの聖母の成域神社を訪れましょう。",
+        "cer": 0.021739130434782608
+      }
+    }
+  ]
+}

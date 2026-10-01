@@ -7,16 +7,18 @@ WhisperX（音声認識）と llama.cpp（`llama-server`）を繋ぐ、最小構
 ```
 ttllm/
 ├── server.py    # FastAPI アプリ本体
-├── install.sh   # whisperX-rocm の venv に追加依存をインストール
+├── install.sh   # NeMo + WhisperX の共用 venv を作成
 ├── run.sh       # ROCm 環境変数を設定して uvicorn を起動
 └── READMEJ.md   # このファイル
 ```
 
-WhisperX-ROCm がインストール済みの venv（`~/AIzunda/whisperX-rocm/.venv`）を共有して動かすので、torch-ROCm / ctranslate2-rocm を二重に入れる必要はありません。`~/AIassistant/whisperX-rocm` はそこへのシンボリックリンクです。
+NeMo と WhisperX は `ttllm/.venv` に同居します（`TTLLM_VENV` で変更可能）。
+WhisperX 単体の venv とは別です。ROCm 10 の確認は [移行手順](../docs/ROCM10.md) を参照。
 
 ## 前提
 
-- `~/AIzunda/whisperX-rocm/.venv` に WhisperX-ROCm 一式（whisperx / torch 2.9+rocm / ctranslate2 / faster-whisper / pyannote.audio）が入っていること
+- システム ROCm 10.0 と gfx1151 GPU。共用 venv は torch 2.8.0+rocm7.12.0 / torchaudio 2.8.0a0+rocm7.12.0 を使用
+- `Speech`（rocm-inference ブランチ）と `whisperX-rocm` のリンク、ビルド済み CTranslate2-ROCm
 - `~/llama.cpp/build/bin/llama-server` がビルド済みであること（MTP 対応のため master 最新を推奨）
 - Qwen3.6 モデル: `~/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf`
 
@@ -27,7 +29,7 @@ cd ~/AIassistant/ttllm
 ./install.sh
 ```
 
-`fastapi` / `uvicorn` / `httpx` / `python-multipart` / `pydantic` を whisperX の venv に追加します。
+NeMo / WhisperX とブリッジの依存を共用 venv にインストールします。
 
 ## 起動
 
@@ -37,7 +39,7 @@ cd ~/AIassistant/ttllm
 cd ~/llama.cpp/build/bin
 ./llama-server \
     -m ~/AIassistant/qwen3.6/Qwen3.6-27B-MTP-Q8_0.gguf \
-    --host 127.0.0.1 --port 8080 \
+    --host 127.0.0.1 --port 9931 \
     -ngl 99 -c 8192 \
     --spec-type draft-mtp
 ```
@@ -107,6 +109,37 @@ curl -X POST http://localhost:8001/warmup
 
 ## 環境変数
 
+### STT バックエンドの選択
+
+| 変数                    | 既定値      | 説明 |
+| ----------------------- | ----------- | ---- |
+| `STT_BACKEND`           | `auto`      | `nemo` / `whisperx` / `auto`。`auto` は NeMo を使い、失敗したら `STT_FALLBACK` へ切り替えて以後そのまま |
+| `STT_FALLBACK`          | `whisperx`  | `auto` 時のフォールバック先。`none` で無効化 |
+| `STT_EAGER_FALLBACK`    | `1`         | warmup でフォールバック先も先読みする。`0` にすると初回フォールバック時にロード待ちが発生する |
+
+`run.sh` は `STT_BACKEND=auto` / `nemo` の場合、HIP 初期化前に
+`GPU_MAX_HW_QUEUES=1` を設定します（既存の値も上書き）。本機で NeMo の GPU グラフ実行後に
+GPU 使用率が待機中も 100% に張り付く現象を回避するためです。`whisperx` 指定時はこの変数を変更しません。
+`auto` で WhisperX にフォールバックした場合も、同じプロセスでは値は `1` のままです。
+
+フォールバックが発動したときは **WARNING ログ**が出て、`/health` の
+`stt.fallback_active` と `stt.last_error` に反映されます。無言で別モデルに変わることはありません。
+
+```bash
+curl -s localhost:8001/health | jq .stt
+```
+
+### NeMo (既定バックエンド)
+
+| 変数                    | 既定値                                        | 説明 |
+| ----------------------- | --------------------------------------------- | ---- |
+| `NEMO_MODEL`            | `nvidia/nemotron-3.5-asr-streaming-0.6b`      | |
+| `NEMO_LANGUAGE`         | `ja-JP`                                       | **`ja` 単体は不可**。`prompt_dictionary` のキー |
+| `NEMO_DEVICE`           | `cuda`                                        | ROCm も `cuda` と名乗る |
+| `NEMO_ATT_CONTEXT_SIZE` | `[56,13]`                                     | ストリーミングのチャンク長。`[左,右]` は 80ms フレーム単位で、チャンク長 = (右+1)×80ms。`[56,13]`=1120ms / `[56,1]`=160ms |
+
+### whisperX (フォールバック)
+
 | 変数                    | 既定値                         | 説明 |
 | ----------------------- | ------------------------------ | ---- |
 | `WHISPER_MODEL`         | `large-v3-turbo`               | WhisperX モデル名 |
@@ -115,12 +148,12 @@ curl -X POST http://localhost:8001/warmup
 | `WHISPER_DEVICE`        | `cuda`                         | ROCm の HIP レイヤー経由で GPU が使われる |
 | `WHISPER_BATCH_SIZE`    | `8`                            | |
 | `WHISPER_VAD_METHOD`    | `silero`                       | `silero` / `pyannote` |
-| `LLAMA_SERVER_URL`      | `http://localhost:8080`        | llama-server の URL |
+| `LLAMA_SERVER_URL`      | `http://localhost:9931`        | llama-server の URL |
 | `LLAMA_TIMEOUT`         | `120`                          | 秒 |
 | `SYSTEM_PROMPT`         | コテコ persona (アルヨ調)      | 既定システムプロンプト |
 | `BRIDGE_HOST`           | `0.0.0.0`                      | |
 | `BRIDGE_PORT`           | `8001`                         | |
-| `WHISPERX_VENV`         | `~/AIzunda/whisperX-rocm/.venv` | 共有する venv のパス（whisperx / torch-ROCm / ctranslate2 が入っている側） |
+| `TTLLM_VENV`            | `~/AIassistant/ttllm/.venv`    | 共用 venv のパス（NeMo と whisperX の両方が入っている側） |
 
 ## フロントからの呼び出し
 

@@ -117,7 +117,7 @@ Mic input
    ↓
 WhisperX (STT) — ~/AIzunda/whisperX-rocm
    ↓ text
-llama-server (LLM) — Qwen3.5-35B, localhost:8080
+llama-server (LLM) — Qwen3.5-35B, localhost:9931
    ↓ reply text
 VOICEVOX Engine (TTS) ← here — localhost:50021
    ↓ WAV audio
