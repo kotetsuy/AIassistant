@@ -1,0 +1,32 @@
+{
+  "downloaded_at": "2026-10-01",
+  "license": "CC0 1.0 (each source page labels the image CC0)",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "images": [
+    {
+      "file": "city_01_crosswalk.jpg",
+      "description": "昼の交差点",
+      "source": "https://pxhere.com/en/photo/104088"
+    },
+    {
+      "file": "city_02_evening_square.jpg",
+      "description": "夜の広場",
+      "source": "https://pxhere.com/en/photo/67305"
+    },
+    {
+      "file": "city_03_night_street.jpg",
+      "description": "夜の市街地",
+      "source": "https://www.pexels.com/photo/buildings-and-cars-414618/"
+    },
+    {
+      "file": "city_04_san_francisco.jpg",
+      "description": "サンフランシスコの坂道",
+      "source": "https://www.pexels.com/photo/view-of-city-street-258447/"
+    },
+    {
+      "file": "city_05_london.jpg",
+      "description": "ロンドンの街角",
+      "source": "https://www.pexels.com/photo/architecture-building-cars-pavement-169572/"
+    }
+  ]
+}

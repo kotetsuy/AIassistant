@@ -20,7 +20,7 @@ TTLLM_URL = os.getenv("TTLLM_URL", "http://localhost:8001")
 TTLLM_TIMEOUT = float(os.getenv("TTLLM_TIMEOUT", "180"))
 VRM_DIR = os.path.expanduser("~/AIassistant/vroid")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "TalkingHead")
-IMAGES_DIR = os.getenv("IMAGES_DIR", os.path.expanduser("~/AIzunda/images"))
+IMAGES_DIR = os.getenv("IMAGES_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "images"))
 
 clients: weakref.WeakSet = weakref.WeakSet()
 
