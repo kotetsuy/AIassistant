@@ -3,7 +3,7 @@
 #
 # 起動順:
 #   1. VOICEVOX (docker)           :50021
-#   2. llama-server (qwen3.6 MoE)  :9931
+#   2. llama-server (既定: Qwen3.6 MoE) :9931
 #   3. ttllm (STT[NeMo/whisperX] ↔ llama) :8001  → /warmup 叩く
 #   4. three-vrm (VRM ビューア)    :8000
 #   5. Chrome で zundamon.html を開く
@@ -24,6 +24,27 @@ SESSION="aiassistant"
 
 LLAMA_BIN="${LLAMA_BIN:-/home/$USER/llama.cpp/build/bin/llama-server}"
 QWEN_MODEL="/home/$USER/AIassistant/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+# 既定は Qwen。LLAMA_BACKEND=nemotron で 395 環境だけ切り替え可能。
+LLAMA_BACKEND="${LLAMA_BACKEND:-qwen}"
+LLAMA_MODEL="$QWEN_MODEL"
+LLAMA_MODEL_NAME="Qwen3.6-35B-A3B"
+LLAMA_MODEL_ARGS=()
+case "$LLAMA_BACKEND" in
+qwen) ;;
+nemotron)
+    if ! grep -Eiq '^model name[[:space:]]*:.*AMD RYZEN AI MAX\+ 395([[:space:]]|$)' /proc/cpuinfo; then
+        printf '%s\n' 'Nemotron は Ryzen AI Max+ 395 環境専用です。' >&2
+        exit 1
+    fi
+    LLAMA_MODEL="/home/$USER/nemotron-3-5-bolt-74b-a9b-24gb/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf"
+    LLAMA_MODEL_NAME="Nemotron 3.5 Bolt 74B-A9B"
+    LLAMA_MODEL_ARGS=(--jinja --reasoning off --parallel 1)
+    ;;
+*)
+    printf '不明な LLAMA_BACKEND: %s (qwen / nemotron)\n' "$LLAMA_BACKEND" >&2
+    exit 1
+    ;;
+esac
 LLAMA_HOST="127.0.0.1"
 LLAMA_PORT="9931"
 LLAMA_CTX="8192"
@@ -92,7 +113,7 @@ command -v curl         >/dev/null || die "curl がありません"
 command -v google-chrome >/dev/null || warn "google-chrome が見つかりません (Chrome 起動はスキップします)"
 
 [[ -x "$LLAMA_BIN"           ]] || die "llama-server が見つかりません: $LLAMA_BIN"
-[[ -f "$QWEN_MODEL"          ]] || die "Qwen モデルが見つかりません: $QWEN_MODEL"
+[[ -f "$LLAMA_MODEL"         ]] || die "${LLAMA_MODEL_NAME} モデルが見つかりません: $LLAMA_MODEL"
 [[ -x "$TTLLM_DIR/run.sh"    ]] || die "ttllm/run.sh がありません"
 [[ -d "$THREE_VRM_DIR"       ]] || die "three-vrm ディレクトリがありません"
 [[ -x "$TTLLM_VENV/bin/python" ]] || die "共用 venv がありません: $TTLLM_VENV (ttllm/install.sh を実行してください)"
@@ -130,10 +151,12 @@ wait_http "VOICEVOX" "http://localhost:50021/version" 60
 
 # ---- 2. llama-server ----------------------------------------------------
 
+log "LLM: ${LLAMA_MODEL_NAME} (${LLAMA_MODEL})"
+printf -v LLAMA_MODEL_QUOTED '%q' "$LLAMA_MODEL"
 LLAMA_CMD="ROCM_PATH=${ROCM_PATH} \
 HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES} \
 LD_LIBRARY_PATH=${LD_LIBRARY_PATH} \
-${LLAMA_BIN} -m ${QWEN_MODEL} --host ${LLAMA_HOST} --port ${LLAMA_PORT} -ngl ${LLAMA_NGL} -c ${LLAMA_CTX} -fit off"
+${LLAMA_BIN} -m ${LLAMA_MODEL_QUOTED} --host ${LLAMA_HOST} --port ${LLAMA_PORT} -ngl ${LLAMA_NGL} -c ${LLAMA_CTX} -fit off ${LLAMA_MODEL_ARGS[*]}"
 
 new_window "llama" "$LLAMA_CMD"
 

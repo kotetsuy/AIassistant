@@ -45,7 +45,14 @@ Ubuntu + AMD Ryzen AI Max+ 395 (ROCm) 上で、**音声 → STT → LLM → TTS 
 | `Speech/` | NeMo Speech の ROCm ブランチ (`~/Speech` へのシンボリックリンク、`rocm-inference`) | — |
 | `whisperX-rocm/` | WhisperX の ROCm フォーク (`~/whisperx/whisperX-rocm` へのシンボリックリンク) | — |
 
-> :pencil: 現在の既定 LLM は **Qwen3.6-35B-A3B (MoE)** です。以前は dense な
+> :pencil: 既定 LLM は全環境で **Qwen3.6-35B-A3B (MoE)** です。
+> Ryzen AI Max+ 395 では `LLAMA_BACKEND=nemotron ./start_all.sh` で
+> Nemotron 3.5 Bolt 74B-A9B に切り替えられます。モデルは
+> `~/nemotron-3-5-bolt-74b-a9b-24gb/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf`
+> に配置してください。Nemotron は 8K・1 スロット・`--reasoning off` で起動します。
+> Qwen に戻すには `./start_all.sh`（または `LLAMA_BACKEND=qwen ./start_all.sh`）を実行します。
+>
+> 以前は dense な
 > Qwen3.6-27B + MTP 投機デコードを使っていましたが、帯域が細い iGPU では MoE の方が
 > 速いため切り替えました。経緯と実測は [`TECHNICALJ.md`](./TECHNICALJ.md) を参照。
 >

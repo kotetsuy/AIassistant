@@ -47,7 +47,14 @@ Browser (three-vrm)
 | `Speech/` | NeMo Speech, ROCm branch (symlink to `~/Speech`, branch `rocm-inference`) | — |
 | `whisperX-rocm/` | ROCm fork of WhisperX (symlink to `~/whisperx/whisperX-rocm`) | — |
 
-> :pencil: The current default LLM is **Qwen3.6-35B-A3B (MoE)**. We previously used a dense
+> :pencil: The default LLM on all CPUs is **Qwen3.6-35B-A3B (MoE)**.
+> On Ryzen AI Max+ 395, use `LLAMA_BACKEND=nemotron ./start_all.sh` to select
+> Nemotron 3.5 Bolt 74B-A9B. Place the model at
+> `~/nemotron-3-5-bolt-74b-a9b-24gb/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf`.
+> Nemotron runs with an 8K context, one slot, and `--reasoning off`.
+> Run `./start_all.sh` (or `LLAMA_BACKEND=qwen ./start_all.sh`) to return to Qwen.
+>
+> We previously used a dense
 > Qwen3.6-27B with MTP speculative decoding, but switched because the MoE model is faster on
 > bandwidth-limited iGPUs. See [`TECHNICAL.md`](./TECHNICAL.md) for the rationale and
 > measurements.
