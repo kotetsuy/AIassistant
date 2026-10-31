@@ -71,6 +71,11 @@ echo "Caching the NeMo ASR model..."
 "$VENV/bin/hf" download nvidia/nemotron-3.5-asr-streaming-0.6b \
     nemotron-3.5-asr-streaming-0.6b.nemo >/dev/null
 
+# auto preloads WhisperX too; its weights must also be available offline.
+echo "Caching the WhisperX fallback model..."
+"$VENV/bin/hf" download mobiuslabsgmbh/faster-whisper-large-v3-turbo \
+    config.json model.bin tokenizer.json vocabulary.json >/dev/null
+
 echo
 echo "Shared venv ready: $VENV"
 "$VENV/bin/python" - <<'PY'

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # AIzunda パイプライン一括起動スクリプト。
 #
-# 起動順:
+# 起動処理 (各サービスのロードは並行):
 #   1. VOICEVOX (docker)           :50021
 #   2. llama-server (既定: Qwen3.6 MoE) :9931
 #   3. ttllm (STT[NeMo/whisperX] ↔ llama) :8001  → /warmup 叩く
@@ -14,6 +14,7 @@
 # ログを見るには: tmux attach -t aizunda
 
 set -euo pipefail
+SECONDS=0
 
 # Chrome / GUIアプリがPipeWireのpulseソケットに確実に接続できるよう
 # PULSE_SERVER を明示する。
@@ -75,7 +76,7 @@ export LD_LIBRARY_PATH="/usr/local/lib:${ROCM_PATH}/lib:${ROCM_PATH}/lib/llvm/li
 
 # ---- helpers ------------------------------------------------------------
 
-log()  { printf '\033[1;34m[launch]\033[0m %s\n' "$*"; }
+log()  { printf '\033[1;34m[launch +%ss]\033[0m %s\n' "$SECONDS" "$*"; }
 warn() { printf '\033[1;33m[launch]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[launch]\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -94,7 +95,7 @@ wait_http() {
         if (( now - start > timeout )); then
             die "${name} did not come up within ${timeout}s"
         fi
-        sleep 2
+        sleep 0.25
     done
 }
 
@@ -147,7 +148,6 @@ fi
 tmux new-session -d -s "$SESSION" -n voicevox \
     "docker logs -f --tail 50 ${VOICEVOX_CONTAINER}"
 
-wait_http "VOICEVOX" "http://localhost:50021/version" 60
 
 # ---- 2. llama-server ----------------------------------------------------
 
@@ -160,29 +160,36 @@ ${LLAMA_BIN} -m ${LLAMA_MODEL_QUOTED} --host ${LLAMA_HOST} --port ${LLAMA_PORT} 
 
 new_window "llama" "$LLAMA_CMD"
 
-# モデルロードに数十秒〜数分かかるのでタイムアウト長め。
-wait_http "llama-server" "http://${LLAMA_HOST}:${LLAMA_PORT}/health" 600
 
 # ---- 3. ttllm -----------------------------------------------------------
 
 new_window "ttllm" "cd ${TTLLM_DIR} && ./run.sh"
 
-wait_http "ttllm" "http://localhost:8001/health" 60
-
-# ---- 4. STT warmup ------------------------------------------------------
-
-log "STT を warmup (モデルロード + 初回推論を先に済ませる) ..."
-if curl -sf -X POST -m 300 http://localhost:8001/warmup -o /dev/null; then
-    log "  warmup 完了"
-else
-    warn "  warmup に失敗 (後続の初回転写が遅くなる可能性)"
-fi
+# STT のロードは llama-server / VOICEVOX の準備と独立して進められる。
+# バックグラウンドの失敗は wait で必ず呼び出し元に伝える。
+warm_stt() {
+    wait_http "ttllm" "http://localhost:8001/health" 60 || return
+    log "STT を warmup (モデルロード + 初回推論) ..."
+    curl -sf -X POST -m 300 http://localhost:8001/warmup -o /dev/null || return
+    log "STT warmup 完了"
+}
+warm_stt &
+STT_WARMUP_PID=$!
+trap 'kill "$STT_WARMUP_PID" 2>/dev/null || true' EXIT
 
 # ---- 5. three-vrm -------------------------------------------------------
 
 new_window "three-vrm" "cd ${THREE_VRM_DIR} && ${TTLLM_VENV}/bin/python server.py"
 
+# ブラウザを開く前に全サービスと STT の初回推論まで待つ。
+wait_http "VOICEVOX" "http://localhost:50021/version" 60
+wait_http "llama-server" "http://${LLAMA_HOST}:${LLAMA_PORT}/health" 600
 wait_http "three-vrm" "http://localhost:8000/status" 30
+if ! wait "$STT_WARMUP_PID"; then
+    die "STT warmup に失敗しました。tmux の ttllm ログを確認してください"
+fi
+trap - EXIT
+log "全サービス準備完了: ${SECONDS}秒"
 
 # ---- 6. Chrome ----------------------------------------------------------
 

@@ -387,12 +387,12 @@ cd ~/AIassistant
 ./start_all.sh
 ```
 
-以下が直列で立ち上がり、HTTP health check で待ち合わせます:
+VOICEVOX・LLM・ttllm・three-vrm を並行起動し、HTTP health check と STT ウォームアップの完了を待ってからブラウザを開きます:
 
 1. VOICEVOX (Docker, port 50021)
 2. llama-server (Qwen3.6-35B-A3B MoE, port 9931)
 3. ttllm ブリッジ (port 8001)
-4. WhisperX warmup (`POST /warmup` を叩いて初回のモデルロードを済ませる)
+4. STT warmup (`POST /warmup` を叩いて初回のモデルロードを済ませる)
 5. three-vrm サーバ (port 8000)
 6. Chrome で `http://localhost:8000/zundamon.html` を自動オープン
 7. vtt (CLI PTT、任意)
@@ -420,7 +420,7 @@ tmux attach -t aiassistant   # ログを見る
 ## 一括起動 / 停止
 
 ```bash
-~/AIassistant/start_all.sh   # 全段起動 + health check + WhisperX warmup + Chrome オープン
+~/AIassistant/start_all.sh   # 全段起動 + health check + STT warmup + Chrome オープン
 ~/AIassistant/stop_all.sh    # tmux セッション + VOICEVOX を停止
 ~/AIassistant/stop_all.sh --keep-voicevox   # VOICEVOX コンテナは残す
 ```
@@ -438,9 +438,10 @@ tmux attach -t aiassistant   # ログを見る
 ログを見る: `tmux attach -t aiassistant`  
 全部落とす: `~/AIassistant/stop_all.sh`
 
-起動順序は依存関係に合わせて直列化しており、各段で HTTP health check 待ちを入れています
-(llama-server のモデルロードだけ最大 600 秒タイムアウト)。ttllm が上がった直後に
-`/warmup` を叩いて WhisperX モデルをあらかじめロードするので、最初の発話が遅くなりません。
+LLM のモデルロードと STT のロード・初回推論を並行して実行します。
+全サービスの HTTP health check と `/warmup` の成功後に Chrome を開きます。
+起動ログには経過秒数と全サービスの準備完了時間が表示されます。
+STT ウォームアップに失敗した場合は起動失敗として通知します。
 
 ## ブラウザでの使い方
 

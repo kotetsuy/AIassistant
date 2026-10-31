@@ -453,8 +453,9 @@ If the first audio comes back in roughly 1 second, you're good.
 View logs: `tmux attach -t aiassistant`  
 Stop everything: `~/AIassistant/stop_all.sh`
 
-The startup order is serialized to follow the dependency graph, with HTTP health-check
-waits at each stage (only the llama-server model load has a generous 600-second timeout).
+Services start concurrently, overlapping LLM loading with STT loading and warmup.
+Chrome opens after all HTTP health checks and STT warmup succeed. Startup logs show
+elapsed seconds and total readiness time; STT warmup failure fails the launch.
 Right after ttllm comes up, `/warmup` is called to load the STT model *and* run one
 throwaway inference, so the very first utterance isn't slow. Loading alone is not enough for
 NeMo: without the warmup pass the first request pays ~2.8s of kernel compilation.

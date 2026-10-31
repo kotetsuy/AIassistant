@@ -47,10 +47,14 @@ class STTRouter:
         self.last_error: str | None = None
 
     def load(self) -> None:
+        if self.fallback_active:
+            self._active.load()
+            return
         try:
             self._primary.load()
         except Exception as e:  # noqa: BLE001 — any load failure should trigger fallback
             self._activate_fallback(f"load failed: {e}")
+            self._active.load()
         if self._fallback is not None and EAGER_FALLBACK and not self.fallback_active:
             try:
                 self._fallback.load()
