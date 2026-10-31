@@ -21,7 +21,7 @@
       "--parallel",
       "1"
     ],
-    "binary": "/home/araki/llama.cpp/build/bin/llama-server",
+    "binary": "~/llama.cpp/build/bin/llama-server",
     "cache": "enabled, repeated identical input",
     "temperature": 0.7,
     "max_tokens": 512,
@@ -54,7 +54,7 @@
   },
   "models": {
     "qwen3.6": {
-      "model": "/home/araki/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+      "model": "~/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
       "baseline_used_bytes": 37231126528.0,
       "runs": [
         {
@@ -594,7 +594,7 @@
       "peak_swap_used_bytes": 79847424
     },
     "nemotron-bolt": {
-      "model": "/home/araki/nemotron-3-5-bolt-74b-a9b-24gb/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf",
+      "model": "~/nemotron-3-5-bolt-74b-a9b-24gb/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf",
       "baseline_used_bytes": 37108113408.0,
       "runs": [
         {

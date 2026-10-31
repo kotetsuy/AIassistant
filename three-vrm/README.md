@@ -32,7 +32,7 @@ WebSocket and lip-syncs a VRM 1.0 model (Zundamon) using `@pixiv/three-vrm`.
   (only required if you want mic input; `~/AIzunda/ttllm/run.sh`)
 - **llama-server** running on `localhost:9931` (a dependency of ttllm)
 - **Zundamon VRM** placed at
-  `/home/araki/AIzunda/zundavrm/VRM/Zundamon_2025_VRM10A.vrm`
+  `~/AIzunda/zundavrm/VRM/Zundamon_2025_VRM10A.vrm`
   (change `VRM_DIR` in `server.py` if your path differs)
 
 ## Pipeline overview

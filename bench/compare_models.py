@@ -3,6 +3,7 @@ import asyncio
 import base64
 import io
 import json
+import re
 import shlex
 import statistics
 import subprocess
@@ -53,7 +54,7 @@ async def healthy():
 async def stop_server():
     subprocess.run(['tmux', 'send-keys', '-t', 'aiassistant:llama', 'C-c'], check=True)
     for _ in range(100):
-        p = subprocess.run(['pgrep', '-f', '^/home/araki/llama.cpp/build/bin/llama-server .*--port 9931'], capture_output=True, text=True)
+        p = subprocess.run(['pgrep', '-f', rf'^{re.escape(str(BIN))} .*--port 9931'], capture_output=True, text=True)
         if p.returncode == 1:
             await asyncio.sleep(1)
             return
