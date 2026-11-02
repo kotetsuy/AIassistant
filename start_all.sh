@@ -52,7 +52,7 @@ LLAMA_CTX="8192"
 LLAMA_NGL="99"
 
 VOICEVOX_CONTAINER="voicevox_engine"
-VOICEVOX_IMAGE="voicevox/voicevox_engine:cpu-ubuntu20.04-latest"
+VOICEVOX_IMAGE="voicevox/voicevox_engine:cpu-ubuntu24.04-0.26.0"
 
 TTLLM_DIR="/home/$USER/AIassistant/ttllm"
 THREE_VRM_DIR="/home/$USER/AIassistant/three-vrm"
@@ -139,8 +139,8 @@ else
     docker run -d \
         --name "$VOICEVOX_CONTAINER" \
         --restart unless-stopped \
-        -p 50021:50021 \
-        "$VOICEVOX_IMAGE" >/dev/null
+        -p 50021:50021 -v voicevox_engine_data_20261026:/home/user/.local/share/voicevox-engine \
+        "$VOICEVOX_IMAGE" --host 0.0.0.0 >/dev/null
 fi
 
 # ---- tmux セッションを作って voicevox ログを 1 枚目に --------------------
